@@ -35,3 +35,13 @@ List with gmm_est, gmm_se, variance_matrix, gmm_pval
 \description{
 Control function for logit model
 }
+\examples{
+set.seed(1)
+n <- 200; J <- 5; K <- 2
+Z <- matrix(rbinom(n * J, 2, 0.3), n, J)
+X <- Z[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+lin_pred <- X \%*\% c(0.8, -0.4)
+Y <- rbinom(n, 1, plogis(lin_pred))
+fit <- cf_logit(X, Y, Z)
+fit$gmm_est
+}

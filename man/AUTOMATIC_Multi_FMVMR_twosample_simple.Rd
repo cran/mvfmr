@@ -6,24 +6,19 @@
 \usage{
 AUTOMATIC_Multi_FMVMR_twosample_simple(
   Gmatrix,
-  res1,
-  res2,
+  res_list,
   by_used,
   sy_used,
   ny_used,
-  max_nPC1 = NA,
-  max_nPC2 = NA,
-  X1Ymodel = NA,
-  X2Ymodel = NA,
+  max_nPC = NA,
+  XYmodels = NA,
   basis = "eigenfunction"
 )
 }
 \arguments{
 \item{Gmatrix}{Genetic instrument matrix from the exposure sample (N × J)}
 
-\item{res1}{FPCA result for exposure 1}
-
-\item{res2}{FPCA result for exposure 2}
+\item{res_list}{List of length m of FPCA results, one per exposure}
 
 \item{by_used}{Vector of SNP-outcome effect estimates (betas) from the outcome GWAS, length J}
 
@@ -31,18 +26,14 @@ AUTOMATIC_Multi_FMVMR_twosample_simple(
 
 \item{ny_used}{Sample size of the outcome GWAS}
 
-\item{max_nPC1}{Maximum number of principal components to retain for exposure 1 (NA = select automatically)}
+\item{max_nPC}{Length-m vector: maximum number of principal components to retain per exposure (NA = select automatically)}
 
-\item{max_nPC2}{Maximum number of principal components to retain for exposure 2 (NA = select automatically)}
-
-\item{X1Ymodel}{True effect model for X1 on Y (for simulation only)}
-
-\item{X2Ymodel}{True effect model for X2 on Y (for simulation only)}
+\item{XYmodels}{Length-m vector: true effect model for each exposure on Y (for simulation only)}
 
 \item{basis}{Basis type for functional representation: "eigenfunction" or "polynomial"}
 }
 \value{
-List with separate estimation results for both exposures
+List with separate estimation results for each of the m exposures
 }
 \description{
 Two-sample joint multivariable FMR (internal)

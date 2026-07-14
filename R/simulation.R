@@ -5,193 +5,159 @@
 #' Generate multi-exposure data with genetic instruments
 #'
 #' @param N Sample size
-#' @param J Number of genetic instruments
+#' @param J Number of genetic instruments (per exposure, if separate_G = TRUE)
 #' @param ZXmodel Model type (currently not used)
 #' @param nSparse Number of sparse observations per subject
 #' @param NT Number of points
 #' @param TT Max observation period
-#' @param shared_effect Whether X1 and X2 share confounding
+#' @param n_exposures Number of exposures to simulate (m)
+#' @param shared_effect Whether all exposures share the same time-varying confounding
 #' @param separate_G Whether to use separate instruments for each exposure
 #' @param shared_G_proportion Proportion of shared instruments (0-1)
 #'
-#' @return List with X1, X2 sparse data and genetic instruments
+#' @return List with per-exposure sparse data and genetic instruments
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 50, J = 8, nSparse = 5, n_exposures = 2)
+#' length(sim_data$exposures)
+#' dim(sim_data$details$G)
 #' @export
-getX_multi_exposure <- function(N = 10000, 
+getX_multi_exposure <- function(N = 10000,
                                 J = 30,
                                 ZXmodel = 'A',
                                 nSparse = 10,
                                 NT = 1000,
-                                TT=50,
+                                TT = 50,
+                                n_exposures = 2,
                                 shared_effect = TRUE,
                                 separate_G = FALSE,
                                 shared_G_proportion = 0.15) {
-  
-  NT <- 1000  
-  TT <- 50 
-  
+
+  m <- n_exposures
+
   times <- seq(0, TT, len = (NT + 1))
-  Times <- times[-1] 
-  times_squ <- times^2 
-  
-  # Initialize G, G1, G2 as NULL
-  G <- NULL
-  G1 <- NULL
-  G2 <- NULL
-  
+  Times <- times[-1]
+  times_squ <- times^2
+
   # Generate genetic instruments
   if (separate_G) {
-    J1 <- J
-    J2 <- J
-    
+    J_vec <- rep(J, m)
+
     if (shared_G_proportion > 0 && shared_G_proportion <= 1) {
       # Shared + unique instruments
       n_shared <- floor(J * shared_G_proportion)
-      
+
       G_shared <- matrix(stats::rbinom(n_shared * N, 2, 0.3), N, n_shared)
-      G1_unique <- matrix(stats::rbinom((J1 - n_shared) * N, 2, 0.3), N, J1 - n_shared)
-      G2_unique <- matrix(stats::rbinom((J2 - n_shared) * N, 2, 0.3), N, J2 - n_shared)
-      
-      G1 <- cbind(G_shared, G1_unique)
-      G2 <- cbind(G_shared, G2_unique)
-      G <- cbind(G_shared, G1_unique, G2_unique)
+      G_unique_list <- lapply(seq_len(m), function(k) {
+        matrix(stats::rbinom((J_vec[k] - n_shared) * N, 2, 0.3), N, J_vec[k] - n_shared)
+      })
+
+      G_list <- lapply(seq_len(m), function(k) cbind(G_shared, G_unique_list[[k]]))
+      G <- do.call(cbind, c(list(G_shared), G_unique_list))
     } else {
-      # Completely independent
-      G1 <- matrix(stats::rbinom(J1 * N, 2, 0.3), N, J1)
-      G2 <- matrix(stats::rbinom(J2 * N, 2, 0.3), N, J2)
-      G <- cbind(G1, G2)
+      # Completely independent instruments
+      G_list <- lapply(seq_len(m), function(k) matrix(stats::rbinom(J_vec[k] * N, 2, 0.3), N, J_vec[k]))
+      G <- do.call(cbind, G_list)
     }
   } else {
-    # Single G matrix for both exposures
+    # Single G matrix shared by all exposures
     G <- matrix(stats::rbinom(J * N, 2, 0.3), N, J)
-    G1 <- G
-    G2 <- G
+    G_list <- lapply(seq_len(m), function(k) G)
   }
-  
-  # Generate baseline confounders
-  if (shared_effect) {
-    a1 <- stats::runif(J, -0.1, 0.1)
-    b1 <- stats::runif(J, -0.004, 0.004)
-    c1 <- stats::runif(J, -0, 0)
-    MGX1 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c1)) +
-                t(matrix(rep(times[-1], J), NT, J) %*% diag(b1)) +
-                a1)
-    
-    a2 <- stats::runif(J, -0.1, 0.1)
-    b2 <- stats::runif(J, -0.004, 0.004)
-    c2 <- stats::runif(J, -0, 0)
-    MGX2 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c2)) +
-                t(matrix(rep(times[-1], J), NT, J) %*% diag(b2)) +
-                a2) 
-  } else {
-    
-    a1 <- stats::runif(J, -0.1, 0.1)
-    b1 <- stats::runif(J, -0.004, 0.004)
-    c1 <- stats::runif(J, -0, 0)
-    MGX1 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c1)) +
-                t(matrix(rep(times[-1], J), NT, J) %*% diag(b1)) +
-                a1)
-    
-    a2 <- stats::runif(J, -0.1, 0.1)
-    b2 <- stats::runif(J, -0.004, 0.004)
-    c2 <- stats::runif(J, -0, 0)
-    MGX2 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c2)) +
-                t(matrix(rep(times[-1], J), NT, J) %*% diag(b2)) +
-                a2)
-  }
-  
+
+  # Generate baseline confounder-effect curves
+  MGX_list <- lapply(seq_len(m), function(k) {
+    a_k <- stats::runif(J, -0.1, 0.1)
+    b_k <- stats::runif(J, -0.004, 0.004)
+    c_k <- stats::runif(J, -0, 0)
+    t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c_k)) +
+        t(matrix(rep(times[-1], J), NT, J) %*% diag(b_k)) +
+        a_k)
+  })
+
   # Generate time-varying confounding and exposures
   if (shared_effect) {
     UUU <- stats::rnorm(N, 0, 1) + t(apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum))
     EX <- apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum)
-    
-    X1 <- G1 %*% t(MGX1) + UUU + t(EX)
-    X2 <- G2 %*% t(MGX2) + UUU + t(EX)
+
+    X_list <- lapply(seq_len(m), function(k) G_list[[k]] %*% t(MGX_list[[k]]) + UUU + t(EX))
   } else {
-    UUU1 <- stats::rnorm(N, 0, 1) + t(apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum))
-    UUU2 <- stats::rnorm(N, 0, 1) + t(apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum))
-    
-    EX1 <- apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum)
-    EX2 <- apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum)
-    
-    X1 <- G1 %*% t(MGX1) + UUU1 + t(EX1)
-    X2 <- G2 %*% t(MGX2) + UUU2 + t(EX2)
+    X_list <- vector("list", m)
+    for (k in seq_len(m)) {
+      UUU_k <- stats::rnorm(N, 0, 1) + t(apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum))
+      EX_k <- apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum)
+      X_list[[k]] <- G_list[[k]] %*% t(MGX_list[[k]]) + UUU_k + t(EX_k)
+    }
   }
-  
+
   # Generate sparse observations
-  Ly_sim1 <- list()
-  Lt_sim1 <- list()
-  Ly_sim2 <- list()
-  Lt_sim2 <- list()
-  
-  for (i in 1:nrow(X1)) {
-    index_sparse <- (1:length(Times))[sort(sample(1:length(Times), nSparse))]
-    time_sparse <- Times[index_sparse]
-    Ly_sim1[[i]] <- X1[i, index_sparse]
-    Lt_sim1[[i]] <- time_sparse
+  Ly_sim_list <- vector("list", m)
+  Lt_sim_list <- vector("list", m)
+
+  for (k in seq_len(m)) {
+    Ly_sim_k <- list()
+    Lt_sim_k <- list()
+
+    for (i in 1:nrow(X_list[[k]])) {
+      index_sparse <- (1:length(Times))[sort(sample(1:length(Times), nSparse))]
+      time_sparse <- Times[index_sparse]
+      Ly_sim_k[[i]] <- X_list[[k]][i, index_sparse]
+      Lt_sim_k[[i]] <- time_sparse
+    }
+
+    Ly_sim_list[[k]] <- Ly_sim_k
+    Lt_sim_list[[k]] <- Lt_sim_k
   }
-  
-  for (i in 1:nrow(X2)) {
-    index_sparse <- (1:length(Times))[sort(sample(1:length(Times), nSparse))]
-    time_sparse <- Times[index_sparse]
-    Ly_sim2[[i]] <- X2[i, index_sparse]
-    Lt_sim2[[i]] <- time_sparse
-  }
-  
+
   # Create output structure
   if (separate_G) {
-    G1_names <- paste0('G1_', 1:ncol(G1))
-    G2_names <- paste0('G2_', 1:ncol(G2))
-    
-    DAT1 <- cbind(G1, X1[, (1:50) * NT / 50])
-    DAT1 <- as.data.frame(DAT1)
-    names(DAT1) <- c(G1_names, paste0('X1', 1:50))
-    
-    DAT2 <- cbind(G2, X2[, (1:50) * NT / 50])
-    DAT2 <- as.data.frame(DAT2)
-    names(DAT2) <- c(G2_names, paste0('X2', 1:50))
-    
-    DAT <- cbind(G1, G2, X1[, (1:50) * NT / 50], X2[, (1:50) * NT / 50])
-    DAT <- as.data.frame(DAT)
-    names(DAT) <- c(G1_names, G2_names, paste0('X1', 1:50), paste0('X2', 1:50))
+    G_names_list <- lapply(seq_len(m), function(k) paste0('G', k, '_', 1:ncol(G_list[[k]])))
+
+    DAT_list <- lapply(seq_len(m), function(k) {
+      DAT_k <- as.data.frame(cbind(G_list[[k]], X_list[[k]][, (1:TT) * NT / TT]))
+      names(DAT_k) <- c(G_names_list[[k]], paste0('X', k, 1:TT))
+      DAT_k
+    })
+
+    DAT <- as.data.frame(do.call(cbind, c(G_list, lapply(X_list, function(X) X[, (1:TT) * NT / TT]))))
+    names(DAT) <- c(unlist(G_names_list), unlist(lapply(seq_len(m), function(k) paste0('X', k, 1:TT))))
   } else {
     G_names <- paste0('G', 1:ncol(G))
-    
-    DAT <- cbind(G, X1[, (1:50) * NT / 50], X2[, (1:50) * NT / 50])  
-    DAT <- as.data.frame(DAT)
-    names(DAT) <- c(G_names, paste0('X1', 1:50), paste0('X2', 1:50))
-    
-    G1 <- NULL
-    G2 <- NULL
+
+    DAT <- as.data.frame(cbind(G, do.call(cbind, lapply(X_list, function(X) X[, (1:TT) * NT / TT]))))
+    names(DAT) <- c(G_names, unlist(lapply(seq_len(m), function(k) paste0('X', k, 1:TT))))
+
+    G_list <- vector("list", m)
   }
-  
+
+  exposures <- vector("list", m)
+  for (k in seq_len(m)) {
+    if (separate_G) {
+      exposures[[k]] <- list(DAT = DAT_list[[k]], Ly_sim = Ly_sim_list[[k]], Lt_sim = Lt_sim_list[[k]])
+    } else {
+      cols <- c(1:J, (J + (k - 1) * TT + 1):(J + k * TT))
+      exposures[[k]] <- list(DAT = DAT[, cols], Ly_sim = Ly_sim_list[[k]], Lt_sim = Lt_sim_list[[k]])
+    }
+  }
+
   RES <- list(
-    X1 = list(
-      DAT = if(separate_G) DAT1 else DAT[, c(1:J, (J+1):(J+TT))],
-      Ly_sim = Ly_sim1,
-      Lt_sim = Lt_sim1
-    ),
-    X2 = list(
-      DAT = if(separate_G) DAT2 else DAT[, c(1:J, (J+TT+1):(J+TT+TT))],
-      Ly_sim = Ly_sim2,
-      Lt_sim = Lt_sim2
-    ),
+    exposures = exposures,
     details = list(
-      J = J, 
-      TT = TT, 
-      NT = NT, 
+      J = J,
+      TT = TT,
+      NT = NT,
       G = G,
-      G1 = G1,
-      G2 = G2,
-      times = times, 
-      X1 = X1,
-      X2 = X2,
+      G_list = G_list,
+      times = times,
+      X_list = X_list,
+      n_exposures = m,
       shared_effect = shared_effect,
       separate_G = separate_G,
       shared_G_proportion = shared_G_proportion
     ),
     DAT = DAT
   )
-  
+
   return(RES)
 }
 
@@ -201,175 +167,210 @@ getX_multi_exposure <- function(N = 10000,
 #' @param J Number of genetic instruments per exposure
 #' @param ZXmodel Model type (currently not used, kept for compatibility)
 #' @param nSparse Number of sparse observations per subject
-#' @param mediation_strength Strength of mediation X1 -> X2 (default 0.3)
+#' @param n_exposures Number of exposures to simulate (m)
+#' @param mediation_strength m x m numeric matrix of pairwise mediation strengths: entry
+#'   \code{[j, k]} (with j < k) is the strength with which exposure j mediates its effect
+#'   onto exposure k, generated later in the sequence. Must be strictly upper triangular
+#'   (entries with j >= k must be 0). Default: NULL, i.e. no mediation (all-zero matrix).
 #' @param separate_G Whether to use separate instruments for each exposure
-#' @param shared_G_proportion Proportion of shared instruments (0–1)
-#' @param mediation_type Character. Type of mediation effect: "linear" (default), "nonlinear", or "time_varying".
-#' 
+#' @param shared_G_proportion Proportion of shared instruments (0-1)
+#' @param mediation_type Character, or m x m character matrix mirroring mediation_strength:
+#'   type of mediation effect for each pair, one of "linear" (default), "nonlinear", or
+#'   "time_varying".
+#'
 #' @return List with same structure as getX_multi_exposure()
+#' @examples
+#' set.seed(1)
+#' # Exposure 1 mediates onto exposure 2 with strength 0.3
+#' mediation_strength <- matrix(c(0, 0, 0.3, 0), 2, 2)
+#' sim_data <- getX_multi_exposure_mediation(
+#'   N = 50, J = 8, nSparse = 5, n_exposures = 2,
+#'   mediation_strength = mediation_strength
+#' )
+#' length(sim_data$exposures)
 #' @export
-getX_multi_exposure_mediation <- function(N = 10000, 
+getX_multi_exposure_mediation <- function(N = 10000,
                                           J = 30,
                                           ZXmodel = 'A',
                                           nSparse = 10,
-                                          mediation_strength = 0.3,
+                                          n_exposures = 2,
+                                          mediation_strength = NULL,
                                           separate_G = FALSE,
                                           shared_G_proportion = 0,
                                           mediation_type = "linear") {
-  
+
+  m <- n_exposures
   NT <- 1000
-  TT <- 50 
-  
+  TT <- 50
+
+  if (is.null(mediation_strength)) {
+    mediation_strength <- matrix(0, m, m)
+  }
+
+  if (!is.matrix(mediation_strength) || !all(dim(mediation_strength) == m)) {
+    stop("mediation_strength must be an m x m matrix")
+  }
+
+  invalid_mask <- lower.tri(mediation_strength, diag = TRUE)
+  if (any(mediation_strength[invalid_mask] != 0)) {
+    bad_idx <- which(invalid_mask & (mediation_strength != 0), arr.ind = TRUE)
+    stop("mediation_strength[j, k] may only be nonzero for j < k (an earlier exposure ",
+         "mediating a later one); invalid entries at: ",
+         paste(apply(bad_idx, 1, function(r) paste0("[", r[1], ",", r[2], "]")), collapse = ", "))
+  }
+
+  if (is.matrix(mediation_type) && !all(dim(mediation_type) == m)) {
+    stop("mediation_type matrix must be m x m")
+  }
+
+  get_mediation_type <- function(j, k) {
+    if (is.matrix(mediation_type)) mediation_type[j, k] else mediation_type
+  }
+
   times <- seq(0, TT, len = (NT + 1))
-  Times <- times[-1] 
-  times_squ <- times^2 
-  
-  G <- NULL
-  G1 <- NULL
-  G2 <- NULL
-  
-  ## Genetic instruments 
+  Times <- times[-1]
+  times_squ <- times^2
+
+  ## Genetic instruments
   if (separate_G) {
-    J1 <- J
-    J2 <- J
-    
+    J_vec <- rep(J, m)
+
     if (shared_G_proportion > 0 && shared_G_proportion <= 1) {
       n_shared <- floor(J * shared_G_proportion)
-      
+
       G_shared <- matrix(stats::rbinom(n_shared * N, 2, 0.3), N, n_shared)
-      G1_unique <- matrix(stats::rbinom((J1 - n_shared) * N, 2, 0.3), N, J1 - n_shared)
-      G2_unique <- matrix(stats::rbinom((J2 - n_shared) * N, 2, 0.3), N, J2 - n_shared)
-      
-      G1 <- cbind(G_shared, G1_unique)
-      G2 <- cbind(G_shared, G2_unique)
-      G  <- cbind(G_shared, G1_unique, G2_unique)
+      G_unique_list <- lapply(seq_len(m), function(k) {
+        matrix(stats::rbinom((J_vec[k] - n_shared) * N, 2, 0.3), N, J_vec[k] - n_shared)
+      })
+
+      G_list <- lapply(seq_len(m), function(k) cbind(G_shared, G_unique_list[[k]]))
+      G <- do.call(cbind, c(list(G_shared), G_unique_list))
     } else {
-      G1 <- matrix(stats::rbinom(J1 * N, 2, 0.3), N, J1)
-      G2 <- matrix(stats::rbinom(J2 * N, 2, 0.3), N, J2)
-      G  <- cbind(G1, G2)
+      G_list <- lapply(seq_len(m), function(k) matrix(stats::rbinom(J_vec[k] * N, 2, 0.3), N, J_vec[k]))
+      G <- do.call(cbind, G_list)
     }
   } else {
-    G  <- matrix(stats::rbinom(J * N, 2, 0.3), N, J)
-    G1 <- G
-    G2 <- G
+    G <- matrix(stats::rbinom(J * N, 2, 0.3), N, J)
+    G_list <- lapply(seq_len(m), function(k) G)
   }
-  
+
   ## Baseline genetic effects
-  noise1 <- stats::rnorm(NT * J, 0, 0.05)
-  noise2 <- stats::rnorm(NT * J, 0, 0.05)
-  
-  a1 <- stats::runif(J, -0.1, 0.1)
-  b1 <- stats::runif(J, -0.004, 0.004)
-  c1 <- stats::runif(J, 0, 0)
-  
-  a2 <- stats::runif(J, -0.1, 0.1)
-  b2 <- stats::runif(J, -0.004, 0.004)
-  c2 <- stats::runif(J, 0, 0)
-  
-  MGX1 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c1)) +
-              t(matrix(rep(times[-1], J), NT, J) %*% diag(b1)) +
-              a1) + noise1
-  
-  MGX2 <- t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c2)) +
-              t(matrix(rep(times[-1], J), NT, J) %*% diag(b2)) +
-              a2) + noise2
-  
+  MGX_list <- lapply(seq_len(m), function(k) {
+    noise_k <- stats::rnorm(NT * J, 0, 0.05)
+    a_k <- stats::runif(J, -0.1, 0.1)
+    b_k <- stats::runif(J, -0.004, 0.004)
+    c_k <- stats::runif(J, 0, 0)
+
+    t(t(matrix(rep(times_squ[-1], J), NT, J) %*% diag(c_k)) +
+        t(matrix(rep(times[-1], J), NT, J) %*% diag(b_k)) +
+        a_k) + noise_k
+  })
+
   ## Time-varying confounding (shared, as in mediation)
   UUU <- stats::rnorm(N, 0, 1) +
     t(apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum))
-  
+
   EX <- apply(matrix(stats::rnorm(NT * N, 0, sqrt(1 / NT)), N, NT), 1, cumsum)
-  
-  ## X1 generation
-  X1 <- G1 %*% t(MGX1) + UUU + t(EX)
-  
-  ## Mediation effect X1 → X2
-  if (mediation_type == "linear") {
-    mediation_effect <- mediation_strength * X1
-  } else if (mediation_type == "nonlinear") {
-    X1s <- scale(X1)
-    mediation_effect <- mediation_strength * (X1s + 0.1 * X1s^2)
-  } else if (mediation_type == "time_varying") {
-    w <- sin(times[-1] * pi / max(times[-1])) + 1
-    w <- w / mean(w)
-    mediation_effect <- mediation_strength * X1 *
-      matrix(rep(w, N), N, NT, byrow = TRUE)
-  } else {
-    stop("Invalid mediation_type")
+
+  ## Generate exposures sequentially so each can be mediated by any earlier exposure
+  X_list <- vector("list", m)
+  mediation_effect_list <- vector("list", m)
+
+  for (k in seq_len(m)) {
+    mediation_effect_k <- matrix(0, N, NT)
+
+    for (j in seq_len(k - 1)) {
+      s <- mediation_strength[j, k]
+      if (s != 0) {
+        Xj <- X_list[[j]]
+        type_jk <- get_mediation_type(j, k)
+
+        if (type_jk == "linear") {
+          mediation_effect_k <- mediation_effect_k + s * Xj
+        } else if (type_jk == "nonlinear") {
+          Xjs <- scale(Xj)
+          mediation_effect_k <- mediation_effect_k + s * (Xjs + 0.1 * Xjs^2)
+        } else if (type_jk == "time_varying") {
+          w <- sin(times[-1] * pi / max(times[-1])) + 1
+          w <- w / mean(w)
+          mediation_effect_k <- mediation_effect_k + s * Xj * matrix(rep(w, N), N, NT, byrow = TRUE)
+        } else {
+          stop("Invalid mediation_type")
+        }
+      }
+    }
+
+    mediation_effect_list[[k]] <- mediation_effect_k
+    X_list[[k]] <- G_list[[k]] %*% t(MGX_list[[k]]) + mediation_effect_k + UUU + t(EX)
   }
-  
-  ## X2 generation
-  X2 <- G2 %*% t(MGX2) + mediation_effect + UUU + t(EX)
-  
-  ## Sparse observations 
-  Ly_sim1 <- Lt_sim1 <- Ly_sim2 <- Lt_sim2 <- list()
-  
-  for (i in 1:N) {
-    idx <- sort(sample(seq_along(Times), nSparse))
-    Ly_sim1[[i]] <- X1[i, idx]
-    Lt_sim1[[i]] <- Times[idx]
-    Ly_sim2[[i]] <- X2[i, idx]
-    Lt_sim2[[i]] <- Times[idx]
+
+  ## Sparse observations
+  Ly_sim_list <- vector("list", m)
+  Lt_sim_list <- vector("list", m)
+
+  for (k in seq_len(m)) {
+    Ly_sim_k <- Lt_sim_k <- vector("list", N)
+
+    for (i in 1:N) {
+      idx <- sort(sample(seq_along(Times), nSparse))
+      Ly_sim_k[[i]] <- X_list[[k]][i, idx]
+      Lt_sim_k[[i]] <- Times[idx]
+    }
+
+    Ly_sim_list[[k]] <- Ly_sim_k
+    Lt_sim_list[[k]] <- Lt_sim_k
   }
-  
+
   ## Data frames
   if (separate_G) {
-    G1_names <- paste0("G1_", 1:ncol(G1))
-    G2_names <- paste0("G2_", 1:ncol(G2))
-    
-    DAT1 <- as.data.frame(cbind(G1, X1[, (1:50) * NT / 50]))
-    names(DAT1) <- c(G1_names, paste0("X1", 1:50))
-    
-    DAT2 <- as.data.frame(cbind(G2, X2[, (1:50) * NT / 50]))
-    names(DAT2) <- c(G2_names, paste0("X2", 1:50))
-    
-    DAT <- as.data.frame(cbind(G1, G2,
-                               X1[, (1:50) * NT / 50],
-                               X2[, (1:50) * NT / 50]))
-    names(DAT) <- c(G1_names, G2_names,
-                    paste0("X1", 1:50),
-                    paste0("X2", 1:50))
+    G_names_list <- lapply(seq_len(m), function(k) paste0("G", k, "_", 1:ncol(G_list[[k]])))
+
+    DAT_list <- lapply(seq_len(m), function(k) {
+      DAT_k <- as.data.frame(cbind(G_list[[k]], X_list[[k]][, (1:TT) * NT / TT]))
+      names(DAT_k) <- c(G_names_list[[k]], paste0("X", k, 1:TT))
+      DAT_k
+    })
+
+    DAT <- as.data.frame(do.call(cbind, c(G_list, lapply(X_list, function(X) X[, (1:TT) * NT / TT]))))
+    names(DAT) <- c(unlist(G_names_list), unlist(lapply(seq_len(m), function(k) paste0("X", k, 1:TT))))
   } else {
     G_names <- paste0("G", 1:ncol(G))
-    DAT <- as.data.frame(cbind(G,
-                               X1[, (1:50) * NT / 50],
-                               X2[, (1:50) * NT / 50]))
-    names(DAT) <- c(G_names, paste0("X1", 1:50), paste0("X2", 1:50))
-    G1 <- G2 <- NULL
+    DAT <- as.data.frame(cbind(G, do.call(cbind, lapply(X_list, function(X) X[, (1:TT) * NT / TT]))))
+    names(DAT) <- c(G_names, unlist(lapply(seq_len(m), function(k) paste0("X", k, 1:TT))))
+    G_list <- vector("list", m)
   }
-  
-  ## Return object 
+
+  ## Return object
+  exposures <- vector("list", m)
+  for (k in seq_len(m)) {
+    if (separate_G) {
+      exposures[[k]] <- list(DAT = DAT_list[[k]], Ly_sim = Ly_sim_list[[k]], Lt_sim = Lt_sim_list[[k]])
+    } else {
+      cols <- c(1:J, (J + (k - 1) * TT + 1):(J + k * TT))
+      exposures[[k]] <- list(DAT = DAT[, cols], Ly_sim = Ly_sim_list[[k]], Lt_sim = Lt_sim_list[[k]])
+    }
+  }
 
   RES <- list(
-    X1 = list(
-      DAT = if (separate_G) DAT1 else DAT[, c(1:J, (J+1):(J+TT))],
-      Ly_sim = Ly_sim1,
-      Lt_sim = Lt_sim1
-    ),
-    X2 = list(
-      DAT = if (separate_G) DAT2 else DAT[, c(1:J, (J+TT+1):(J+TT+TT))],
-      Ly_sim = Ly_sim2,
-      Lt_sim = Lt_sim2
-    ),
+    exposures = exposures,
     details = list(
       J = J,
       TT = TT,
       NT = NT,
       G = G,
-      G1 = G1,
-      G2 = G2,
+      G_list = G_list,
       times = times,
-      X1 = X1,
-      X2 = X2,
+      X_list = X_list,
+      n_exposures = m,
       mediation_strength = mediation_strength,
       mediation_type = mediation_type,
-      mediation_effect = mediation_effect,
+      mediation_effect = mediation_effect_list,
       separate_G = separate_G,
       shared_G_proportion = shared_G_proportion
     ),
     DAT = DAT
   )
-  
+
   return(RES)
 }
 
@@ -377,21 +378,27 @@ getX_multi_exposure_mediation <- function(N = 10000,
 #' Generate outcome from exposures
 #'
 #' @param RES Output from getX_multi_exposure() or getX_multi_exposure_mediation()
-#' @param X1Ymodel Effect model for X1 (0-9)
-#' @param X2Ymodel Effect model for X2 (0-9)  
-#' @param X1_effect Include X1 effect?
-#' @param X2_effect Include X2 effect?
+#' @param XYmodels Length-m vector of effect models per exposure, one of '0'-'9' (default: '1' for all)
+#' @param X_effects Length-m logical vector: include each exposure's effect? (default: TRUE for all)
 #' @param outcome_type "continuous" or "binary"
-#' 
+#'
 #' @return Data frame with outcome Y
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 50, J = 8, nSparse = 5, n_exposures = 2)
+#' dat <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"), outcome_type = "continuous")
+#' head(dat$Y)
 #' @export
 getY_multi_exposure <- function(RES,
-                                X1Ymodel = '1',
-                                X2Ymodel = '1',
-                                X1_effect = TRUE,
-                                X2_effect = TRUE,
+                                XYmodels = NULL,
+                                X_effects = NULL,
                                 outcome_type = "continuous") {
-  
+
+  m <- RES$details$n_exposures
+
+  XYmodels <- recycle_arg(XYmodels, m, default = '1')
+  X_effects <- recycle_arg(X_effects, m, default = TRUE)
+
   # Effect functions
   get_fun <- function(model_type) {
     switch(model_type,
@@ -403,41 +410,38 @@ getY_multi_exposure <- function(RES,
            '5' = function(t) 0.1 * (t > 30),
            '6' = function(t) 0.05 * (-t + 20) * (t < 20),
            '7' = function(t) 0.05 * (t - 30) * (t > 30),
-           '8' = function(t) 0.002 * t^2 - 0.11 * t + 0.5, 
+           '8' = function(t) 0.002 * t^2 - 0.11 * t + 0.5,
            '9' = function(t) -0.00002 * t^3 + 0.004 * t^2 - 0.2 * t + 1
     )
   }
-  
-  fun1 <- get_fun(as.character(X1Ymodel))
-  if(!is.na(X2Ymodel)){
-    fun2 <- get_fun(as.character(X2Ymodel))
-  }else{
-    fun2 <- get_fun('0')
-  }
-  
-  X1 <- RES$details$X1
-  X2 <- RES$details$X2
+
+  X_list <- RES$details$X_list
   TT <- RES$details$TT
   NT <- RES$details$NT
-  
+
   times <- seq(0, TT, len = (NT + 1))
-  effect_vec1 <- as.numeric(fun1(times[-1]))
-  effect_vec2 <- as.numeric(fun2(times[-1]))
-  
-  if (!X1_effect) effect_vec1 <- rep(0, length(effect_vec1))
-  if (!X2_effect) effect_vec2 <- rep(0, length(effect_vec2))
-  
-  linear_predictor <- (X1 %*% effect_vec1) * TT/NT + (X2 %*% effect_vec2) * TT/NT
-  
+
+  effect_vec_list <- lapply(seq_len(m), function(k) {
+    model_k <- if (is.na(XYmodels[k])) '0' else as.character(XYmodels[k])
+    fun_k <- get_fun(model_k)
+    effect_vec_k <- as.numeric(fun_k(times[-1]))
+    if (!X_effects[k]) effect_vec_k <- rep(0, length(effect_vec_k))
+    effect_vec_k
+  })
+
+  linear_predictor <- Reduce(`+`, lapply(seq_len(m), function(k) {
+    (X_list[[k]] %*% effect_vec_list[[k]]) * TT / NT
+  }))
+
   if (outcome_type == "continuous") {
-    Y <- linear_predictor + stats::rnorm(nrow(X1), 0, 1)
+    Y <- linear_predictor + stats::rnorm(nrow(X_list[[1]]), 0, 1)
   } else if (outcome_type == "binary") {
     prob_Y <- 1 / (1 + exp(-linear_predictor))
-    Y <- stats::rbinom(nrow(X1), 1, prob_Y)
+    Y <- stats::rbinom(nrow(X_list[[1]]), 1, prob_Y)
   } else {
     stop("outcome_type must be either 'continuous' or 'binary'")
   }
-  
+
   # Get DAT from RES
   if (!is.null(RES$DAT)) {
     DAT <- RES$DAT
@@ -445,27 +449,20 @@ getY_multi_exposure <- function(RES,
     J <- ncol(RES$details$G)
     DAT <- data.frame(
       RES$details$G,
-      X1[, (1:TT) * NT / TT],
-      X2[, (1:TT) * NT / TT]
+      do.call(cbind, lapply(X_list, function(X) X[, (1:TT) * NT / TT]))
     )
-    names(DAT) <- c(paste0('G', 1:J), paste0('X1', 1:TT), paste0('X2', 1:TT))
+    names(DAT) <- c(paste0('G', 1:J), unlist(lapply(seq_len(m), function(k) paste0('X', k, 1:TT))))
   }
-  
+
   DAT$Y <- as.numeric(Y)
-  
+
   attr(DAT, "model_info") <- list(
-    X1_model = X1Ymodel,
-    X2_model = X2Ymodel,
-    X1_effect = X1_effect,
-    X2_effect = X2_effect,
+    XYmodels = XYmodels,
+    X_effects = X_effects,
     outcome_type = outcome_type,
-    effect_vec1 = effect_vec1,
-    effect_vec2 = effect_vec2,
+    effect_vec_list = effect_vec_list,
     times = times[-1]
   )
-  
+
   return(DAT)
 }
-
-
-

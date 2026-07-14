@@ -3,7 +3,7 @@
 # UNIVARIABLE FUNCTIONAL MR (U-FMR) TEST - SINGLE EXPOSURE
 # =============================================================================
 # This script tests the fmvmr package for SINGLE EXPOSURE analysis
-# Demonstrates how to use fmvmr_separate() for univariable functional MR
+# Demonstrates how to use mvfmr_separate() for univariable functional MR
 
 cat("\n========================================\n")
 cat("   TESTING U-FMR - SINGLE EXPOSURE\n")
@@ -28,12 +28,12 @@ cat("------------------------------------------\n")
 
 set.seed(12345)
 
-# Simulate exposure data
-# Note: We generate two exposures but will only analyze the first one
+# Simulate a single exposure (n_exposures = 1)
 RES <- getX_multi_exposure(
   N = 500,           # Sample size
   J = 30,            # Number of genetic instruments
   nSparse = 10,      # Sparse observations per subject
+  n_exposures = 1,   # Single exposure
   shared_effect = FALSE  # No shared confounding (single exposure analysis)
 )
 
@@ -48,10 +48,10 @@ cat("  - Observations per subject:", 10, "\n\n")
 cat("TEST 2: Functional PCA for Exposure 1\n")
 cat("--------------------------------------\n")
 
-# Perform FPCA on exposure 1
+# Perform FPCA on the (only) exposure
 res1 <- FPCA(
-  RES$X1$Ly_sim, 
-  RES$X1$Lt_sim,
+  RES$exposures[[1]]$Ly_sim,
+  RES$exposures[[1]]$Lt_sim,
   list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
 )
 
@@ -66,13 +66,11 @@ cat("  - Variance explained:", round(sum(res1$lambda[1:res1$selectK]) / sum(res1
 cat("TEST 3: Outcome Simulation\n")
 cat("--------------------------\n")
 
-# Generate outcome where ONLY exposure 1 has a causal effect
+# Generate outcome where the exposure has a causal effect
 DAT <- getY_multi_exposure(
   RES,
-  X1Ymodel = "2",     # Linear time-varying effect for exposure 1
-  X2Ymodel = NA,      # No exposure 2
-  X1_effect = TRUE,   # Include effect of exposure 1
-  X2_effect = FALSE,  # Exclude effect of exposure 2
+  XYmodels = "2",     # Linear time-varying effect
+  X_effects = TRUE,   # Include the effect
   outcome_type = "continuous"
 )
 
@@ -88,25 +86,24 @@ cat("  - Outcome SD:", round(sd(DAT$Y), 3), "\n\n")
 cat("TEST 4: Univariable Functional MR Estimation\n")
 cat("---------------------------------------------\n")
 
-# Estimate causal effect of EXPOSURE 1 ONLY using fmvmr_separate()
+# Estimate causal effect of EXPOSURE 1 ONLY using mvfmr_separate()
+# with a G_list of length 1
 result <- mvfmr_separate(
-  G1 = RES$details$G,           # Genetic instruments for exposure 1
-  G2 = NULL,                    # No instruments for exposure 2 (single exposure)
+  G_list = list(RES$details$G),  # Genetic instruments for the exposure
   fpca_results = list(res1),
   Y = DAT$Y,
   outcome_type = "continuous",
   method = "gmm",               # Generalized Method of Moments
-  max_nPC1 = 5,                 # Maximum components to consider
-  max_nPC2 = 5,                 # (not used for single exposure)
+  max_nPC = 5,                  # Maximum components to consider
   improvement_threshold = 0.001,
   bootstrap = FALSE,            # Set TRUE for bootstrap inference
   n_cores = 2,
-  true_effects = list(model1 = "2", model2 = "0"),  # True effects for validation
+  true_effects = "2",           # True effect for validation
   verbose = FALSE
 )
 
 cat("Estimation completed!\n")
-cat("  - Components selected for X1:", result$exposure1$nPC_used, "\n")
+cat("  - Components selected for X1:", result$exposures[[1]]$nPC_used, "\n")
 cat("  - Method: GMM (Generalized Method of Moments)\n\n")
 
 # =============================================================================
@@ -135,8 +132,8 @@ cat("TEST 6: Performance Metrics\n")
 cat("---------------------------\n")
 
 cat("\nExposure 1 Performance:\n")
-cat("  - MISE (Mean Integrated Squared Error):", round(result$exposure1$performance$MISE, 6), "\n")
-cat("  - Coverage Rate:", round(result$exposure1$performance$Coverage, 3), "\n")
+cat("  - MISE (Mean Integrated Squared Error):", round(result$exposures[[1]]$performance$MISE, 6), "\n")
+cat("  - Coverage Rate:", round(result$exposures[[1]]$performance$Coverage, 3), "\n")
 
 
 # =============================================================================
@@ -148,9 +145,9 @@ cat("-------------------------------------------\n")
 
 # Calculate F-statistics for exposure 1
 fstats <- IS(
-  J = ncol(RES$details$G), 
-  K = res1$selectK, 
-  PC = 1:res1$selectK, 
+  J = ncol(RES$details$G),
+  K = res1$selectK,
+  PC = 1:res1$selectK,
   datafull = cbind(RES$details$G, res1$xiEst[, 1:res1$selectK]),
   Y = DAT$Y
 )
@@ -178,16 +175,16 @@ cat("  - Dashed lines: 95% confidence interval\n")
 cat("  - Blue line: True effect (if provided)\n\n")
 
 # Create custom plot with more details
-ggdata <- result$raw_result$ggdata1
+ggdata <- result$raw_result$ggdata[[1]]
 
 custom_plot <- ggplot(ggdata, aes(x = time)) +
   geom_line(aes(y = effect), linewidth = 1, color = "black") +
-  geom_ribbon(aes(ymin = effect_low, ymax = effect_up), 
+  geom_ribbon(aes(ymin = effect_low, ymax = effect_up),
               alpha = 0.2, fill = "blue") +
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
   labs(
     title = "Time-Varying Causal Effect of Exposure 1",
-    subtitle = paste0("U-FMR with ", result$exposure1$nPC_used, " components"),
+    subtitle = paste0("U-FMR with ", result$exposures[[1]]$nPC_used, " components"),
     x = "Time / Age",
     y = "Causal Effect β(t)"
   ) +
@@ -198,7 +195,7 @@ custom_plot <- ggplot(ggdata, aes(x = time)) +
     panel.grid.minor = element_blank()
   )
 
-if (!is.na(result$raw_result$ggdata1$true_shape[1])) {
+if (!is.na(ggdata$true_shape[1])) {
   custom_plot <- custom_plot +
     geom_line(aes(y = true_shape), color = "red", linewidth = 1, linetype = "dashed")
 }
@@ -217,31 +214,27 @@ cat("-------------------------------\n")
 # Generate new outcome with quadratic effect
 DAT_quad <- getY_multi_exposure(
   RES,
-  X1Ymodel = "8",     # Quadratic effect (inverted U-shape)
-  X2Ymodel = "0",     # No effect for X2
-  X1_effect = TRUE,
-  X2_effect = FALSE,
+  XYmodels = "8",     # Quadratic effect (inverted U-shape)
+  X_effects = TRUE,
   outcome_type = "continuous"
 )
 
 # Estimate
 result_quad <- mvfmr_separate(
-  G1 = RES$details$G,
-  G2 = NULL,
+  G_list = list(RES$details$G),
   fpca_results = list(res1),
   Y = DAT_quad$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 5,
-  max_nPC2 = 5,
-  true_effects = list(model1 = "8", model2 = "0"),
+  max_nPC = 5,
+  true_effects = "8",
   verbose = FALSE
 )
 
 cat("Quadratic model estimated\n")
-cat("  - Components selected:", result_quad$exposure1$nPC_used, "\n")
-cat("  - MISE:", round(result_quad$exposure1$performance$MISE, 6), "\n")
-cat("  - Coverage:", round(result_quad$exposure1$performance$Coverage, 3), "\n\n")
+cat("  - Components selected:", result_quad$exposures[[1]]$nPC_used, "\n")
+cat("  - MISE:", round(result_quad$exposures[[1]]$performance$MISE, 6), "\n")
+cat("  - Coverage:", round(result_quad$exposures[[1]]$performance$Coverage, 3), "\n\n")
 
 # =============================================================================
 # TEST 10: BINARY OUTCOME
@@ -253,10 +246,8 @@ cat("-----------------------\n")
 # Generate binary outcome
 DAT_binary <- getY_multi_exposure(
   RES,
-  X1Ymodel = "2",     # Linear effect
-  X2Ymodel = "0",     # No effect
-  X1_effect = TRUE,
-  X2_effect = FALSE,
+  XYmodels = "2",     # Linear effect
+  X_effects = TRUE,
   outcome_type = "binary"
 )
 
@@ -267,20 +258,18 @@ cat("  - Prevalence:", round(mean(DAT_binary$Y), 3), "\n\n")
 
 # Estimate with control function method
 result_binary <- mvfmr_separate(
-  G1 = RES$details$G,
-  G2 = NULL,
+  G_list = list(RES$details$G),
   fpca_results = list(res1),
   Y = DAT_binary$Y,
   outcome_type = "binary",
   method = "cf",      # Control function for binary outcomes
-  max_nPC1 = 3,
-  max_nPC2 = 3,
+  max_nPC = 3,
   verbose = FALSE
 )
 
 cat("Binary outcome estimation completed\n")
 cat("  - Method: Control Function (2SRI)\n")
-cat("  - Components selected:", result_binary$exposure1$nPC_used, "\n\n")
+cat("  - Components selected:", result_binary$exposures[[1]]$nPC_used, "\n\n")
 
 # =============================================================================
 # TEST 11: BOOTSTRAP INFERENCE
@@ -292,18 +281,16 @@ cat("Note: Bootstrap is computationally intensive\n")
 cat("Running with small number of replicates (10) for demonstration\n\n")
 
 result_bootstrap <- mvfmr_separate(
-  G1 = RES$details$G,
-  G2 = NULL,
+  G_list = list(RES$details$G),
   fpca_results = list(res1),
   Y = DAT$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 5,
-  max_nPC2 = 5,
+  max_nPC = 5,
   bootstrap = TRUE,
   n_bootstrap = 10,  # Use 100-200 for real analysis
   n_cores = 2,
-  true_effects = list(model1 = "2", model2 = "0"),
+  true_effects = "2",
   verbose = FALSE
 )
 
@@ -332,38 +319,34 @@ comparison_results <- data.frame(
 
 for (i in seq_along(effect_models)) {
   cat("  Testing model", effect_models[i], ":", model_names[i], "...\n")
-  
+
   # Generate outcome
   outcome_temp <- getY_multi_exposure(
     RES,
-    X1Ymodel = effect_models[i],
-    X2Ymodel = "0",
-    X1_effect = TRUE,
-    X2_effect = FALSE,
+    XYmodels = effect_models[i],
+    X_effects = TRUE,
     outcome_type = "continuous"
   )
-  
+
   # Estimate
   result_temp <- mvfmr_separate(
-    G1 = RES$details$G,
-    G2 = NULL,
+    G_list = list(RES$details$G),
     fpca_results = list(res1),
     Y = outcome_temp$Y,
     outcome_type = "continuous",
     method = "gmm",
-    max_nPC1 = 5,
-    max_nPC2 = 5,
-    true_effects = list(model1 = effect_models[i], model2 = "0"),
+    max_nPC = 5,
+    true_effects = effect_models[i],
     verbose = FALSE
   )
-  
+
   # Store results
   comparison_results <- rbind(comparison_results, data.frame(
     Model = effect_models[i],
     Name = model_names[i],
-    nPC = result_temp$exposure1$nPC_used,
-    MISE = result_temp$exposure1$performance$MISE,
-    Coverage = result_temp$exposure1$performance$Coverage
+    nPC = result_temp$exposures[[1]]$nPC_used,
+    MISE = result_temp$exposures[[1]]$performance$MISE,
+    Coverage = result_temp$exposures[[1]]$performance$Coverage
   ))
 }
 
@@ -382,10 +365,10 @@ output_dir <- tempdir()
 
 # Extract time-varying effect curve
 effect_curve <- data.frame(
-  time = result$raw_result$ggdata1$time,
-  effect = result$raw_result$ggdata1$effect,
-  lower_ci = result$raw_result$ggdata1$effect_low,
-  upper_ci = result$raw_result$ggdata1$effect_up
+  time = result$raw_result$ggdata[[1]]$time,
+  effect = result$raw_result$ggdata[[1]]$effect,
+  lower_ci = result$raw_result$ggdata[[1]]$effect_low,
+  upper_ci = result$raw_result$ggdata[[1]]$effect_up
 )
 
 # Save results to CSV
@@ -394,9 +377,9 @@ cat("Results saved to:", file.path(output_dir, "ufmr_effect_curve.csv"), "\n")
 
 # Save coefficients
 coef_df <- data.frame(
-  Component = paste0("Beta_", 1:length(result$exposure1$coefficients)),
-  Coefficient = result$exposure1$coefficients,
-  SE = sqrt(diag(result$exposure1$vcov))
+  Component = paste0("Beta_", 1:length(result$exposures[[1]]$coefficients)),
+  Coefficient = result$exposures[[1]]$coefficients,
+  SE = sqrt(diag(result$exposures[[1]]$vcov))
 )
 
 write.csv(coef_df, file.path(output_dir, "ufmr_coefficients.csv"), row.names = FALSE)

@@ -5,42 +5,30 @@
 \title{Two-Sample Separate Univariable Functional MR}
 \usage{
 fmvmr_separate_twosample(
-  G1_exposure,
-  G2_exposure = NULL,
+  G_list,
   fpca_results,
-  by_outcome1,
-  by_outcome2 = NULL,
-  sy_outcome1,
-  sy_outcome2 = NULL,
+  by_outcome_list,
+  sy_outcome_list,
   ny_outcome,
-  max_nPC1 = NA,
-  max_nPC2 = NA,
+  max_nPC = NA,
   true_effects = NULL,
   verbose = TRUE
 )
 }
 \arguments{
-\item{G1_exposure}{Genetic instrument matrix from exposure 1 (N × J1)}
+\item{G_list}{List of length m of genetic instrument matrices, one per exposure (N x J_k)}
 
-\item{G2_exposure}{Genetic instrument matrix from exposure 2 (N × J2) or NULL for single exposure}
+\item{fpca_results}{List of length m of FPCA objects, same length as G_list}
 
-\item{fpca_results}{List of 2 FPCA objects}
+\item{by_outcome_list}{List of length m of SNP-outcome beta vectors, one per exposure}
 
-\item{by_outcome1}{SNP-outcome betas for exposure 1 instruments}
-
-\item{by_outcome2}{SNP-outcome betas for exposure 2 instruments or NULL}
-
-\item{sy_outcome1}{Standard errors for exposure 1}
-
-\item{sy_outcome2}{Standard errors for exposure 2 or NULL}
+\item{sy_outcome_list}{List of length m of SNP-outcome standard error vectors, one per exposure}
 
 \item{ny_outcome}{Outcome GWAS sample size}
 
-\item{max_nPC1}{Maximum number of principal components to retain for exposure 1 (NA = automatically determined)}
+\item{max_nPC}{Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)}
 
-\item{max_nPC2}{Maximum number of principal components to retain for exposure 2 (NA = automatically determined)}
-
-\item{true_effects}{List containing true effects for exposure 1 and exposure 2 (simulation only)}
+\item{true_effects}{Length-m vector of true effect model codes, one per exposure (simulation only)}
 
 \item{verbose}{Print progress messages and diagnostics during computation}
 }
@@ -49,5 +37,30 @@ fmvmr_separate_twosample object
 }
 \description{
 Separate estimation for each exposure using outcome GWAS summary statistics.
-For single exposure: set G2 = NULL, by2 = NULL, sy2 = NULL.
+}
+\examples{
+set.seed(1)
+sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+                list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+})
+# Simulate outcome GWAS summary statistics for the two-sample design
+by_outcome <- sapply(1:8, function(j) {
+  coef(lm(outcome_data$Y ~ sim_data$details$G[, j]))[2]
+})
+sy_outcome <- sapply(1:8, function(j) {
+  summary(lm(outcome_data$Y ~ sim_data$details$G[, j]))$coefficients[2, 2]
+})
+result <- fmvmr_separate_twosample(
+  G_list = list(sim_data$details$G, sim_data$details$G),
+  fpca_results = fpca_results,
+  by_outcome_list = list(by_outcome, by_outcome),
+  sy_outcome_list = list(sy_outcome, sy_outcome),
+  ny_outcome = 60,
+  max_nPC = c(2, 2),
+  verbose = FALSE
+)
+result$exposures[[1]]$coefficients
 }

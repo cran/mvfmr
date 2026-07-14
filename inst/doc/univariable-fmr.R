@@ -7,7 +7,11 @@ knitr::opts_chunk$set(
 )
 
 ## ----install, eval=FALSE------------------------------------------------------
-#  devtools::install_github("NicoleFontana/mvfmr")
+#  # Install from CRAN
+#  install.packages("mvfmr")
+#  
+#  # Or, for the development version:
+#  # devtools::install_github("NicoleFontana/mvfmr")
 
 ## ----load---------------------------------------------------------------------
 library(mvfmr)
@@ -17,11 +21,12 @@ library(ggplot2)
 ## ----simulate-----------------------------------------------------------------
 set.seed(12345)
 
-# Generate exposure data (we'll only use X1)
+# Generate exposure data with a single exposure (m = 1)
 sim_data <- getX_multi_exposure(
   N = 300,
   J = 25,
-  nSparse = 10
+  nSparse = 10,
+  n_exposures = 1
 )
 
 cat("Data simulated:\n")
@@ -31,10 +36,8 @@ cat("  Instruments:", ncol(sim_data$details$G), "\n")
 ## ----outcome------------------------------------------------------------------
 outcome_data <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",     # Linear effect: β(t) = 0.02×t
-  X2Ymodel = "0",     # No effect from X2
-  X1_effect = TRUE,
-  X2_effect = FALSE,  # X2 does not affect Y
+  XYmodels = "2",     # Linear effect: beta(t) = 0.02*t
+  X_effects = TRUE,
   outcome_type = "continuous"
 )
 
@@ -42,30 +45,27 @@ cat("Outcome summary:\n")
 summary(outcome_data$Y)
 
 ## ----fpca---------------------------------------------------------------------
-# FPCA for exposure 1 only
 fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
+  sim_data$exposures[[1]]$Ly_sim,
+  sim_data$exposures[[1]]$Lt_sim,
   list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
 )
 
 cat("FPCA completed:\n")
 cat("  Components selected:", fpca1$selectK, "\n")
-cat("  Variance explained:", 
+cat("  Variance explained:",
     round(sum(fpca1$lambda[1:fpca1$selectK]) / sum(fpca1$lambda) * 100, 1), "%\n")
 
 ## ----estimation---------------------------------------------------------------
 result <- mvfmr_separate(
-  G1 = sim_data$details$G,   # Instruments for X1
-  G2 = NULL,                  # No second exposure
+  G_list = list(sim_data$details$G),
   fpca_results = list(fpca1),
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 4,
-  max_nPC2 = 4,  # Not used when G2 = NULL
+  max_nPC = 4,
   n_cores = 1,
-  true_effects = list(model1 = "2", model2 = "0"),
+  true_effects = "2",
   verbose = FALSE
 )
 
@@ -80,35 +80,32 @@ cat("Estimated coefficients:\n")
 print(round(coef(result, exposure = 1), 4))
 
 # Time-varying effect curve
-cat("\nFirst 10 time points of β(t):\n")
-head(result$exposure1$effect, 10)
+cat("\nFirst 10 time points of beta(t):\n")
+head(result$exposures[[1]]$effect, 10)
 
 ## ----performance--------------------------------------------------------------
 cat("Performance:\n")
-cat("  MISE:", round(result$exposure1$performance$MISE, 6), "\n")
-cat("  Coverage:", round(result$exposure1$performance$Coverage, 3), "\n")
-cat("  Components used:", result$exposure1$nPC_used, "\n")
+cat("  MISE:", round(result$exposures[[1]]$performance$MISE, 6), "\n")
+cat("  Coverage:", round(result$exposures[[1]]$performance$Coverage, 3), "\n")
+cat("  Components used:", result$exposures[[1]]$nPC_used, "\n")
 
 ## ----binary, eval=FALSE-------------------------------------------------------
 #  # Generate binary outcome
 #  outcome_binary <- getY_multi_exposure(
 #    sim_data,
-#    X1Ymodel = "2",
-#    X2Ymodel = "0",
-#    X1_effect = TRUE,
-#    X2_effect = FALSE,
+#    XYmodels = "2",
+#    X_effects = TRUE,
 #    outcome_type = "binary"
 #  )
 #  
 #  # Estimate with control function
 #  result_binary <- mvfmr_separate(
-#    G1 = sim_data$details$G,
-#    G2 = NULL,
+#    G_list = list(sim_data$details$G),
 #    fpca_results = list(fpca1),
 #    Y = outcome_binary$Y,
 #    outcome_type = "binary",
 #    method = "cf",      # Control function for binary
-#    max_nPC1 = 3,
+#    max_nPC = 3,
 #    n_cores = 1,
 #    verbose = FALSE
 #  )
@@ -120,18 +117,17 @@ cat("  Components used:", result$exposure1$nPC_used, "\n")
 ## ----bootstrap, eval=FALSE----------------------------------------------------
 #  # Get robust confidence intervals via bootstrap
 #  result_boot <- mvfmr_separate(
-#    G1 = sim_data$details$G,
-#    G2 = NULL,
+#    G_list = list(sim_data$details$G),
 #    fpca_results = list(fpca1),
 #    Y = outcome_data$Y,
 #    outcome_type = "continuous",
 #    bootstrap = TRUE,
 #    n_bootstrap = 100,
-#    max_nPC1 = 4,
+#    max_nPC = 4,
 #    verbose = FALSE
 #  )
 #  
-#  # Bootstrap CIs are stored in result_boot$exposure1$...
+#  # Bootstrap CIs are stored in result_boot$exposures[[1]]$...
 
 ## ----twosample, eval=FALSE----------------------------------------------------
 #  # Simulate GWAS summary statistics
@@ -139,15 +135,12 @@ cat("  Components used:", result$exposure1$nPC_used, "\n")
 #  sy_outcome <- runif(25, 0.005, 0.015)
 #  
 #  result_2sample <- fmvmr_separate_twosample(
-#    G1_exposure = sim_data$details$G,
-#    G2_exposure = NULL,
+#    G_list = list(sim_data$details$G),
 #    fpca_results = list(fpca1),
-#    by_outcome1 = by_outcome,
-#    by_outcome2 = NULL,
-#    sy_outcome1 = sy_outcome,
-#    sy_outcome2 = NULL,
+#    by_outcome_list = list(by_outcome),
+#    sy_outcome_list = list(sy_outcome),
 #    ny_outcome = 50000,
-#    max_nPC1 = 3,
+#    max_nPC = 3,
 #    verbose = FALSE
 #  )
 #  

@@ -23,3 +23,12 @@ Matrix with columns: PC (component index), RR (R-squared), FF (F-statistic), cFF
 \description{
 Calculate F-statistics and Q-statistic for instrument strength (internal)
 }
+\examples{
+set.seed(1)
+n <- 200; J <- 5; K <- 2
+G <- matrix(rbinom(n * J, 2, 0.3), n, J)
+PCmat <- G[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+Y <- as.numeric(PCmat \%*\% c(1, -0.5) + rnorm(n))
+fstats <- IS(J = J, K = K, PC = 1:K, datafull = cbind(G, PCmat), Y = Y)
+fstats
+}

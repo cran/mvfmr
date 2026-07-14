@@ -7,8 +7,8 @@ knitr::opts_chunk$set(
 )
 
 ## ----install, eval=FALSE------------------------------------------------------
-#  # Install from GitHub
-#  devtools::install_github("NicoleFontana/mvfmr")
+#  # Install from CRAN
+#  install.packages("mvfmr")
 
 ## ----load---------------------------------------------------------------------
 library(mvfmr)
@@ -16,13 +16,14 @@ library(fdapace)
 library(ggplot2)
 
 ## ----simulate_data------------------------------------------------------------
-set.seed(12345)
+set.seed(473920)
 
 # Generate exposure data
 sim_data <- getX_multi_exposure(
   N = 300,              # Sample size
   J = 25,               # Number of genetic instruments
-  nSparse = 10          # Observations per subject
+  nSparse = 10,          # Observations per subject
+  n_exposures = 2        # Number of exposures (m)
 )
 
 # Check dimensions
@@ -32,10 +33,8 @@ cat("Number of instruments:", ncol(sim_data$details$G), "\n")
 ## ----generate_outcome---------------------------------------------------------
 outcome_data <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",     # Linear: β₁(t) = 0.02 * t
-  X2Ymodel = "5",     # Late-age effect: β₂(t) = 0.1 * (t > 30)
-  X1_effect = TRUE,
-  X2_effect = TRUE,
+  XYmodels = c("2", "2"),     # Exposure 1/2: linear beta(t) = 0.02*t
+  X_effects = c(TRUE, TRUE),
   outcome_type = "continuous"
 )
 
@@ -43,38 +42,32 @@ cat("Outcome summary:\n")
 summary(outcome_data$Y)
 
 ## ----fpca---------------------------------------------------------------------
-# FPCA for exposure 1
-fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
-
-# FPCA for exposure 2
-fpca2 <- FPCA(
-  sim_data$X2$Ly_sim, 
-  sim_data$X2$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  FPCA(
+    exp_k$Ly_sim,
+    exp_k$Lt_sim,
+    list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
+  )
+})
 
 cat("FPCA completed:\n")
-cat("  Exposure 1:", fpca1$selectK, "components selected\n")
-cat("  Exposure 2:", fpca2$selectK, "components selected\n")
+for (k in seq_along(fpca_results)) {
+  cat("  Exposure", k, ":", fpca_results[[k]]$selectK, "components selected\n")
+}
 
 ## ----joint_estimation---------------------------------------------------------
 result_joint <- mvfmr(
   G = sim_data$details$G,
-  fpca_results = list(fpca1, fpca2),
+  fpca_results = fpca_results,
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 4,
-  max_nPC2 = 4,
+  max_nPC = c(4, 4),
   improvement_threshold = 0.001,
   bootstrap = FALSE,
   n_cores = 1,
-  true_effects = list(model1 = "2", model2 = "5"),
-  X_true = list(X1_true = sim_data$details$X1, X2_true = sim_data$details$X2),
+  true_effects = c("2", "2"),
+  X_true = sim_data$details$X_list,
   verbose = FALSE
 )
 
@@ -82,39 +75,35 @@ result_joint <- mvfmr(
 print(result_joint)
 
 ## ----plot_effects, fig.width=10, fig.height=4---------------------------------
-# Plot both effects
+# Plot every exposure's effect
 plot(result_joint)
 
 ## ----coefficients-------------------------------------------------------------
 # Estimated beta coefficients for basis functions
 coef(result_joint)
 
-# Time-varying effects at each time point
-head(result_joint$effects$effect1)
-head(result_joint$effects$effect2)
+# Time-varying effects at each time point (one entry per exposure)
+head(result_joint$effects[[1]])
+head(result_joint$effects[[2]])
 
 ## ----performance--------------------------------------------------------------
 cat("Performance Metrics:\n")
-cat("\nExposure 1 (Linear effect):\n")
-cat("  MISE:", round(result_joint$performance$MISE1, 6), "\n")
-cat("  Coverage:", round(result_joint$performance$Coverage1, 3), "\n")
-
-cat("\nExposure 2 (Quadratic effect):\n")
-cat("  MISE:", round(result_joint$performance$MISE2, 6), "\n")
-cat("  Coverage:", round(result_joint$performance$Coverage2, 3), "\n")
+for (k in seq_along(result_joint$effects)) {
+  cat("\nExposure", k, ":\n")
+  cat("  MISE:", round(result_joint$performance$MISE[[k]], 6), "\n")
+  cat("  Coverage:", round(result_joint$performance$Coverage[[k]], 3), "\n")
+}
 
 ## ----separate_estimation------------------------------------------------------
 result_separate <- mvfmr_separate(
-  G1 = sim_data$details$G,
-  G2 = sim_data$details$G,
-  fpca_results = list(fpca1, fpca2),
+  G_list = list(sim_data$details$G, sim_data$details$G),
+  fpca_results = fpca_results,
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 4,
-  max_nPC2 = 4,
+  max_nPC = c(4, 4),
   n_cores = 1,
-  true_effects = list(model1 = "2", model2 = "5"),
+  true_effects = c("2", "2"),
   verbose = FALSE
 )
 
@@ -125,16 +114,16 @@ comparison <- data.frame(
   Method = rep(c("Joint (MV-FMR)", "Separate (U-FMR)"), each = 2),
   Exposure = rep(c("X1", "X2"), times = 2),
   MISE = c(
-    result_joint$performance$MISE1,
-    result_joint$performance$MISE2,
-    result_separate$exposure1$performance$MISE,
-    result_separate$exposure2$performance$MISE
+    result_joint$performance$MISE[[1]],
+    result_joint$performance$MISE[[2]],
+    result_separate$exposures[[1]]$performance$MISE,
+    result_separate$exposures[[2]]$performance$MISE
   ),
   Coverage = c(
-    result_joint$performance$Coverage1,
-    result_joint$performance$Coverage2,
-    result_separate$exposure1$performance$Coverage,
-    result_separate$exposure2$performance$Coverage
+    result_joint$performance$Coverage[[1]],
+    result_joint$performance$Coverage[[2]],
+    result_separate$exposures[[1]]$performance$Coverage,
+    result_separate$exposures[[2]]$performance$Coverage
   )
 )
 
@@ -142,45 +131,82 @@ print(comparison)
 
 ## ----diagnostics--------------------------------------------------------------
 # Calculate F-statistics
-K_total <- result_joint$nPC_used$nPC1 + result_joint$nPC_used$nPC2
+K_total <- sum(result_joint$nPC_used)
+
+PC_stacked <- do.call(cbind, lapply(seq_along(fpca_results), function(k) {
+  fpca_results[[k]]$xiEst[, 1:result_joint$nPC_used[k]]
+}))
 
 fstats <- IS(
   J = ncol(sim_data$details$G),
   K = K_total,
   PC = 1:K_total,
-  datafull = cbind(
-    sim_data$details$G,
-    cbind(fpca1$xiEst[, 1:result_joint$nPC_used$nPC1], 
-          fpca2$xiEst[, 1:result_joint$nPC_used$nPC2])
-  ),
+  datafull = cbind(sim_data$details$G, PC_stacked),
   Y = outcome_data$Y
 )
 
-print(fstats)
+fstats_df <- cbind(
+  "Exposure" = unlist(lapply(seq_along(result_joint$nPC_used), function(k) {
+    rep(paste0("X", k), result_joint$nPC_used[k])
+  })),
+  as.data.frame(fstats)
+)
+
+print(fstats_df[, c("Exposure", "PC", "cFF")])
 
 ## ----binary_outcome, eval=FALSE-----------------------------------------------
 #  # Generate binary outcome
 #  outcome_binary <- getY_multi_exposure(
 #    sim_data,
-#    X1Ymodel = "2",
-#    X2Ymodel = "5",
+#    XYmodels = c("2", "2"),
 #    outcome_type = "binary"
 #  )
 #  
 #  # Estimate with control function
 #  result_binary <- mvfmr(
 #    G = sim_data$details$G,
-#    fpca_results = list(fpca1, fpca2),
+#    fpca_results = fpca_results,
 #    Y = outcome_binary$Y,
 #    outcome_type = "binary",
 #    method = "cf",  # Control function for binary
-#    max_nPC1 = 3,
-#    max_nPC2 = 3,
+#    max_nPC = c(3, 3),
 #    n_cores = 1,
 #    verbose = FALSE
 #  )
 #  
 #  print(result_binary)
+
+## ----m3_example---------------------------------------------------------------
+set.seed(163918)#281046
+sim_data3 <- getX_multi_exposure(N = 500, J = 50, nSparse = 10, n_exposures = 3)
+
+outcome_data3 <- getY_multi_exposure(
+  sim_data3,
+  XYmodels = c("2", "2", "2"),
+  outcome_type = "continuous"
+)
+
+fpca_results3 <- lapply(sim_data3$exposures, function(exp_k) {
+  FPCA(exp_k$Ly_sim, exp_k$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+})
+
+result_joint3 <- mvfmr(
+  G = sim_data3$details$G,
+  fpca_results = fpca_results3,
+  Y = outcome_data3$Y,
+  outcome_type = "continuous",
+  method = "gmm",
+  max_nPC = c(4, 4, 4),
+  n_cores = 1,
+  true_effects = c("2", "2", "2"),
+  X_true = sim_data3$details$X_list,
+  verbose = FALSE
+)
+
+print(result_joint3)
+
+## ----m3_plot, fig.width=12, fig.height=4--------------------------------------
+plot(result_joint3)
 
 ## ----session_info-------------------------------------------------------------
 sessionInfo()

@@ -6,23 +6,17 @@
 \usage{
 getY_multi_exposure(
   RES,
-  X1Ymodel = "1",
-  X2Ymodel = "1",
-  X1_effect = TRUE,
-  X2_effect = TRUE,
+  XYmodels = NULL,
+  X_effects = NULL,
   outcome_type = "continuous"
 )
 }
 \arguments{
 \item{RES}{Output from getX_multi_exposure() or getX_multi_exposure_mediation()}
 
-\item{X1Ymodel}{Effect model for X1 (0-9)}
+\item{XYmodels}{Length-m vector of effect models per exposure, one of '0'-'9' (default: '1' for all)}
 
-\item{X2Ymodel}{Effect model for X2 (0-9)}
-
-\item{X1_effect}{Include X1 effect?}
-
-\item{X2_effect}{Include X2 effect?}
+\item{X_effects}{Length-m logical vector: include each exposure's effect? (default: TRUE for all)}
 
 \item{outcome_type}{"continuous" or "binary"}
 }
@@ -31,4 +25,10 @@ Data frame with outcome Y
 }
 \description{
 Generate outcome from exposures
+}
+\examples{
+set.seed(1)
+sim_data <- getX_multi_exposure(N = 50, J = 8, nSparse = 5, n_exposures = 2)
+dat <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"), outcome_type = "continuous")
+head(dat$Y)
 }

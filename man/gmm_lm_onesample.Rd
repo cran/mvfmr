@@ -21,3 +21,12 @@ List with gmm_est, gmm_se, variance_matrix, gmm_pval, Q_stat, Q_pval
 \description{
 GMM estimation for continuous outcome
 }
+\examples{
+set.seed(1)
+n <- 200; J <- 5; K <- 2
+Z <- matrix(rbinom(n * J, 2, 0.3), n, J)
+X <- Z[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+Y <- as.numeric(X \%*\% c(1, -0.5) + rnorm(n))
+fit <- gmm_lm_onesample(X, Y, Z)
+fit$gmm_est
+}

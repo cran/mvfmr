@@ -9,7 +9,8 @@ getX_multi_exposure_mediation(
   J = 30,
   ZXmodel = "A",
   nSparse = 10,
-  mediation_strength = 0.3,
+  n_exposures = 2,
+  mediation_strength = NULL,
   separate_G = FALSE,
   shared_G_proportion = 0,
   mediation_type = "linear"
@@ -24,17 +25,34 @@ getX_multi_exposure_mediation(
 
 \item{nSparse}{Number of sparse observations per subject}
 
-\item{mediation_strength}{Strength of mediation X1 -> X2 (default 0.3)}
+\item{n_exposures}{Number of exposures to simulate (m)}
+
+\item{mediation_strength}{m x m numeric matrix of pairwise mediation strengths: entry
+\code{[j, k]} (with j < k) is the strength with which exposure j mediates its effect
+onto exposure k, generated later in the sequence. Must be strictly upper triangular
+(entries with j >= k must be 0). Default: NULL, i.e. no mediation (all-zero matrix).}
 
 \item{separate_G}{Whether to use separate instruments for each exposure}
 
-\item{shared_G_proportion}{Proportion of shared instruments (0–1)}
+\item{shared_G_proportion}{Proportion of shared instruments (0-1)}
 
-\item{mediation_type}{Character. Type of mediation effect: "linear" (default), "nonlinear", or "time_varying".}
+\item{mediation_type}{Character, or m x m character matrix mirroring mediation_strength:
+type of mediation effect for each pair, one of "linear" (default), "nonlinear", or
+"time_varying".}
 }
 \value{
 List with same structure as getX_multi_exposure()
 }
 \description{
 Generate multi-exposure mediation data with genetic instruments
+}
+\examples{
+set.seed(1)
+# Exposure 1 mediates onto exposure 2 with strength 0.3
+mediation_strength <- matrix(c(0, 0, 0.3, 0), 2, 2)
+sim_data <- getX_multi_exposure_mediation(
+  N = 50, J = 8, nSparse = 5, n_exposures = 2,
+  mediation_strength = mediation_strength
+)
+length(sim_data$exposures)
 }

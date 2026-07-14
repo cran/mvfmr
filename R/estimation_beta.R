@@ -8,6 +8,14 @@
 #' @param Z Genetic instrument matrix (N x J)
 #' @param beta0 Initial values for beta (default NA, uses zero initialization)
 #' @return List with gmm_est, gmm_se, variance_matrix, gmm_pval, Q_stat, Q_pval
+#' @examples
+#' set.seed(1)
+#' n <- 200; J <- 5; K <- 2
+#' Z <- matrix(rbinom(n * J, 2, 0.3), n, J)
+#' X <- Z[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+#' Y <- as.numeric(X %*% c(1, -0.5) + rnorm(n))
+#' fit <- gmm_lm_onesample(X, Y, Z)
+#' fit$gmm_est
 #' @export
 gmm_lm_onesample <- function(X, Y, Z, beta0 = NA) {
   n <- nrow(Z)
@@ -82,6 +90,15 @@ gmm_lm_onesample <- function(X, Y, Z, beta0 = NA) {
 #' @param standardize Standardize variables before fitting
 #' @param use_lasso Use LASSO regularization in first stage. If FALSE, uses OLS.
 #' @return List with gmm_est, gmm_se, variance_matrix, gmm_pval
+#' @examples
+#' set.seed(1)
+#' n <- 200; J <- 5; K <- 2
+#' Z <- matrix(rbinom(n * J, 2, 0.3), n, J)
+#' X <- Z[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+#' lin_pred <- X %*% c(0.8, -0.4)
+#' Y <- rbinom(n, 1, plogis(lin_pred))
+#' fit <- cf_logit(X, Y, Z)
+#' fit$gmm_est
 #' @export
 cf_logit <- function(X, Y, Z, alpha = 1, nfolds = 10, standardize = TRUE, use_lasso = FALSE) {
   n <- nrow(Z)
@@ -149,6 +166,14 @@ cf_logit <- function(X, Y, Z, alpha = 1, nfolds = 10, standardize = TRUE, use_la
 #' @param sy Vector length J of outcome GWAS standard errors  
 #' @param ny Outcome GWAS sample size
 #' @return  List with gmm_est, gmm_se, variance_matrix, gmm_pval, Q_stat, Q_df, Q_pval
+#' @examples
+#' set.seed(1)
+#' J <- 10; K <- 2
+#' bx <- matrix(rnorm(J * K, sd = 0.3), J, K)
+#' by <- bx %*% c(0.5, -0.2) + rnorm(J, sd = 0.05)
+#' sy <- runif(J, 0.02, 0.05)
+#' fit <- gmm_twosample_simple(bx, by, sy, ny = 50000)
+#' fit$gmm_est
 #' @export
 gmm_twosample_simple <- function(bx, by, sy, ny) {
   

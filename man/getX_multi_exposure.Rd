@@ -11,6 +11,7 @@ getX_multi_exposure(
   nSparse = 10,
   NT = 1000,
   TT = 50,
+  n_exposures = 2,
   shared_effect = TRUE,
   separate_G = FALSE,
   shared_G_proportion = 0.15
@@ -19,7 +20,7 @@ getX_multi_exposure(
 \arguments{
 \item{N}{Sample size}
 
-\item{J}{Number of genetic instruments}
+\item{J}{Number of genetic instruments (per exposure, if separate_G = TRUE)}
 
 \item{ZXmodel}{Model type (currently not used)}
 
@@ -29,15 +30,23 @@ getX_multi_exposure(
 
 \item{TT}{Max observation period}
 
-\item{shared_effect}{Whether X1 and X2 share confounding}
+\item{n_exposures}{Number of exposures to simulate (m)}
+
+\item{shared_effect}{Whether all exposures share the same time-varying confounding}
 
 \item{separate_G}{Whether to use separate instruments for each exposure}
 
 \item{shared_G_proportion}{Proportion of shared instruments (0-1)}
 }
 \value{
-List with X1, X2 sparse data and genetic instruments
+List with per-exposure sparse data and genetic instruments
 }
 \description{
 Generate multi-exposure data with genetic instruments
+}
+\examples{
+set.seed(1)
+sim_data <- getX_multi_exposure(N = 50, J = 8, nSparse = 5, n_exposures = 2)
+length(sim_data$exposures)
+dim(sim_data$details$G)
 }

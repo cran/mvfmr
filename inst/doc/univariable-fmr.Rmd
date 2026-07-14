@@ -24,7 +24,7 @@ This vignette demonstrates **Univariable Functional Mendelian Randomization (U-F
 
 ### When to Use U-FMR
 
-Use univariable estimation (`mvfmr_separate()` with `G2 = NULL`) when:
+Use univariable estimation (`mvfmr_separate()` with a `G_list` of length 1) when:
 
 - You have a **single exposure** of interest
 - No need to adjust for other exposures
@@ -32,7 +32,11 @@ Use univariable estimation (`mvfmr_separate()` with `G2 = NULL`) when:
 ## Installation
 
 ```{r install, eval=FALSE}
-devtools::install_github("NicoleFontana/mvfmr")
+# Install from CRAN
+install.packages("mvfmr")
+
+# Or, for the development version:
+# devtools::install_github("NicoleFontana/mvfmr")
 ```
 
 ```{r load}
@@ -48,11 +52,12 @@ library(ggplot2)
 ```{r simulate}
 set.seed(12345)
 
-# Generate exposure data (we'll only use X1)
+# Generate exposure data with a single exposure (m = 1)
 sim_data <- getX_multi_exposure(
   N = 300,
   J = 25,
-  nSparse = 10
+  nSparse = 10,
+  n_exposures = 1
 )
 
 cat("Data simulated:\n")
@@ -62,15 +67,13 @@ cat("  Instruments:", ncol(sim_data$details$G), "\n")
 
 ### Step 2: Generate Outcome
 
-We create an outcome where **only X1 has a causal effect**:
+We create an outcome where **the exposure has a linear causal effect**:
 
 ```{r outcome}
 outcome_data <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",     # Linear effect: β(t) = 0.02×t
-  X2Ymodel = "0",     # No effect from X2
-  X1_effect = TRUE,
-  X2_effect = FALSE,  # X2 does not affect Y
+  XYmodels = "2",     # Linear effect: beta(t) = 0.02*t
+  X_effects = TRUE,
   outcome_type = "continuous"
 )
 
@@ -78,38 +81,35 @@ cat("Outcome summary:\n")
 summary(outcome_data$Y)
 ```
 
-### Step 3: FPCA for Single Exposure
+### Step 3: FPCA for the Single Exposure
 
 ```{r fpca}
-# FPCA for exposure 1 only
 fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
+  sim_data$exposures[[1]]$Ly_sim,
+  sim_data$exposures[[1]]$Lt_sim,
   list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
 )
 
 cat("FPCA completed:\n")
 cat("  Components selected:", fpca1$selectK, "\n")
-cat("  Variance explained:", 
+cat("  Variance explained:",
     round(sum(fpca1$lambda[1:fpca1$selectK]) / sum(fpca1$lambda) * 100, 1), "%\n")
 ```
 
 ### Step 4: Univariable Estimation
 
-Estimate the causal effect using `mvfmr_separate()` with **only one exposure**:
+Estimate the causal effect using `mvfmr_separate()` with a `G_list` of length 1:
 
 ```{r estimation}
 result <- mvfmr_separate(
-  G1 = sim_data$details$G,   # Instruments for X1
-  G2 = NULL,                  # No second exposure
+  G_list = list(sim_data$details$G),
   fpca_results = list(fpca1),
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 4,
-  max_nPC2 = 4,  # Not used when G2 = NULL
+  max_nPC = 4,
   n_cores = 1,
-  true_effects = list(model1 = "2", model2 = "0"),
+  true_effects = "2",
   verbose = FALSE
 )
 
@@ -122,7 +122,7 @@ print(result)
 plot(result)
 ```
 
-The solid colored lines show the estimated time-varying causal effects, with shaded bands representing 95% confidence intervals. The dashed red lines (when present) indicate the true time-varying effects used in the simulation.
+The solid colored line shows the estimated time-varying causal effect, with a shaded band representing the 95% confidence interval. The dashed red line (when present) indicates the true time-varying effect used in the simulation.
 
 ### Step 6: Extract Results
 
@@ -132,17 +132,17 @@ cat("Estimated coefficients:\n")
 print(round(coef(result, exposure = 1), 4))
 
 # Time-varying effect curve
-cat("\nFirst 10 time points of β(t):\n")
-head(result$exposure1$effect, 10)
+cat("\nFirst 10 time points of beta(t):\n")
+head(result$exposures[[1]]$effect, 10)
 ```
 
 ### Step 7: Performance Metrics
 
 ```{r performance}
 cat("Performance:\n")
-cat("  MISE:", round(result$exposure1$performance$MISE, 6), "\n")
-cat("  Coverage:", round(result$exposure1$performance$Coverage, 3), "\n")
-cat("  Components used:", result$exposure1$nPC_used, "\n")
+cat("  MISE:", round(result$exposures[[1]]$performance$MISE, 6), "\n")
+cat("  Coverage:", round(result$exposures[[1]]$performance$Coverage, 3), "\n")
+cat("  Components used:", result$exposures[[1]]$nPC_used, "\n")
 ```
 
 ## Binary Outcomes
@@ -153,22 +153,19 @@ U-FMR also works with binary outcomes:
 # Generate binary outcome
 outcome_binary <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",
-  X2Ymodel = "0",
-  X1_effect = TRUE,
-  X2_effect = FALSE,
+  XYmodels = "2",
+  X_effects = TRUE,
   outcome_type = "binary"
 )
 
 # Estimate with control function
 result_binary <- mvfmr_separate(
-  G1 = sim_data$details$G,
-  G2 = NULL,
+  G_list = list(sim_data$details$G),
   fpca_results = list(fpca1),
   Y = outcome_binary$Y,
   outcome_type = "binary",
   method = "cf",      # Control function for binary
-  max_nPC1 = 3,
+  max_nPC = 3,
   n_cores = 1,
   verbose = FALSE
 )
@@ -185,7 +182,7 @@ cat("Controls:", sum(outcome_binary$Y == 0), "\n")
 The package includes 10 pre-defined time-varying effect shapes:
 
 - `"0"`: No effect (null)
-- `"1"`: Constant (β = 0.1)
+- `"1"`: Constant (beta = 0.1)
 - `"2"`: Linear increasing
 - `"3"`: Linear decreasing
 - `"4"`: Early life effect
@@ -200,18 +197,17 @@ The package includes 10 pre-defined time-varying effect shapes:
 ```{r bootstrap, eval=FALSE}
 # Get robust confidence intervals via bootstrap
 result_boot <- mvfmr_separate(
-  G1 = sim_data$details$G,
-  G2 = NULL,
+  G_list = list(sim_data$details$G),
   fpca_results = list(fpca1),
   Y = outcome_data$Y,
   outcome_type = "continuous",
   bootstrap = TRUE,
   n_bootstrap = 100,
-  max_nPC1 = 4,
+  max_nPC = 4,
   verbose = FALSE
 )
 
-# Bootstrap CIs are stored in result_boot$exposure1$...
+# Bootstrap CIs are stored in result_boot$exposures[[1]]$...
 ```
 
 ### Two-Sample Design
@@ -224,15 +220,12 @@ by_outcome <- rnorm(25, 0.02, 0.01)
 sy_outcome <- runif(25, 0.005, 0.015)
 
 result_2sample <- fmvmr_separate_twosample(
-  G1_exposure = sim_data$details$G,
-  G2_exposure = NULL,
+  G_list = list(sim_data$details$G),
   fpca_results = list(fpca1),
-  by_outcome1 = by_outcome,
-  by_outcome2 = NULL,
-  sy_outcome1 = sy_outcome,
-  sy_outcome2 = NULL,
+  by_outcome_list = list(by_outcome),
+  sy_outcome_list = list(sy_outcome),
   ny_outcome = 50000,
-  max_nPC1 = 3,
+  max_nPC = 3,
   verbose = FALSE
 )
 

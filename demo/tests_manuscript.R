@@ -1,10 +1,10 @@
 # ============= TEST FOR THE 3 PAPER SCENARIOS # =============
-# Tests the 3 main scenarios presented in the paper:
+# Tests the 3 main scenarios presented in the paper (parameters simplified for computing them faster):
 # - Scenario 1: Shared confounding with G1, G2, G12 (15% overlap)
 # - Scenario 2: No X2 effect with shared confounding
 # - Scenario 3: Mediation scenario
 #
-# Compares Multi vs Separate approaches using MISE and Coverage 
+# Compares Multi vs Separate approaches using MISE and Coverage
 
 library(mvfmr)
 library(fdapace)
@@ -29,7 +29,7 @@ isres_all <- data.frame() # For cFF/FF
 
 # ============= SCENARIO 1: PLEIOTROPY MODEL # =============
 # Paper Section 4a
-# Genetic variants G12 influence both the exposures X1 and X2 
+# Genetic variants G12 influence both the exposures X1 and X2
 # shared_G_proportion = 0.15 (15% of instruments are shared)
 # Both X1 and X2 have causal effects on Y
 
@@ -45,35 +45,34 @@ XY_grid <- expand.grid(X1 = X1Ymodel_vec, X2 = X2Ymodel_vec)
 for (i in 1:nrow(XY_grid)) {
   for (sim in 1:n_sim) {
     cat(paste0("Scenario 1 - Grid ", i, "/", nrow(XY_grid), " - Sim ", sim, "/", n_sim, "\n"))
-    
+
     set.seed(sim * 12345)
-    
+
     # Generate data with shared confounding
     RES <- getX_multi_exposure(
-      N = N, 
-      J = J, 
+      N = N,
+      J = J,
       nSparse = nSparse,
+      n_exposures = 2,
       shared_effect = TRUE,
       separate_G = TRUE,
       shared_G_proportion = 0.15
     )
-    
+
     # FPCA
-    res1 <- FPCA(RES$X1$Ly_sim, RES$X1$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    res2 <- FPCA(RES$X2$Ly_sim, RES$X2$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    
+    res1 <- FPCA(RES$exposures[[1]]$Ly_sim, RES$exposures[[1]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+    res2 <- FPCA(RES$exposures[[2]]$Ly_sim, RES$exposures[[2]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+
     # Generate outcome
     DAT <- getY_multi_exposure(
       RES,
-      X1Ymodel = XY_grid[i, "X1"],
-      X2Ymodel = XY_grid[i, "X2"],
-      X1_effect = TRUE,
-      X2_effect = TRUE,
+      XYmodels = c(XY_grid[i, "X1"], XY_grid[i, "X2"]),
+      X_effects = c(TRUE, TRUE),
       outcome_type = "continuous"
     )
-    
+
     # Calculate Instrument Strength (IS)
-    
+
     # For MULTIVARIABLE approach: cFF (conditional F-statistic)
     K_total <- res1$selectK + res2$selectK
     IS_multi <- IS(
@@ -85,7 +84,7 @@ for (i in 1:nrow(XY_grid)) {
         cbind(res1$xiEst[, 1:res1$selectK], res2$xiEst[, 1:res2$selectK])
       )
     )
-    
+
     IS_multi_df <- as.data.frame(IS_multi) %>%
       mutate(
         Exposure = c(rep("X1", res1$selectK), rep("X2", res2$selectK)),
@@ -96,23 +95,23 @@ for (i in 1:nrow(XY_grid)) {
         X2Ymodel = XY_grid[i, "X2"],
         Approach = "Multivariable"
       )
-    
+
     # For SEPARATE approach: FF (standard F-statistic)
     # Uses separate G matrices for each exposure
     IS_sep1 <- IS(
-      J = ncol(RES$details$G1),
+      J = ncol(RES$details$G_list[[1]]),
       K = res1$selectK,
       PC = 1:res1$selectK,
-      datafull = cbind(RES$details$G1, res1$xiEst[, 1:res1$selectK])
+      datafull = cbind(RES$details$G_list[[1]], res1$xiEst[, 1:res1$selectK])
     )
-    
+
     IS_sep2 <- IS(
-      J = ncol(RES$details$G2),
+      J = ncol(RES$details$G_list[[2]]),
       K = res2$selectK,
       PC = 1:res2$selectK,
-      datafull = cbind(RES$details$G2, res2$xiEst[, 1:res2$selectK])
+      datafull = cbind(RES$details$G_list[[2]], res2$xiEst[, 1:res2$selectK])
     )
-    
+
     IS_sep_df <- rbind(
       as.data.frame(IS_sep1) %>%
         mutate(
@@ -135,10 +134,10 @@ for (i in 1:nrow(XY_grid)) {
           Approach = "Separate"
         )
     )
-    
+
     # Combine IS results
     isres_all <- rbind(isres_all, IS_multi_df, IS_sep_df)
-    
+
     # Multi approach (joint estimation)
     result_multi <- mvfmr(
       G = RES$details$G,
@@ -146,48 +145,41 @@ for (i in 1:nrow(XY_grid)) {
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      ),
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"]),
       verbose = FALSE
     )
-    
+
     # Separate approach (univariable estimation)
     result_separate <- mvfmr_separate(
-      G1 = RES$details$G1,
-      G2 = RES$details$G2,
+      G_list = list(RES$details$G_list[[1]], RES$details$G_list[[2]]),
       fpca_results = list(res1, res2),
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      ),
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"]),
       verbose = FALSE
     )
-    
+
     # Store results
     temp_res <- data.frame(
       Scenario = "Scenario 1: Pleiotropy model",
       Simulation = sim,
       X1Ymodel = XY_grid[i, "X1"],
       X2Ymodel = XY_grid[i, "X2"],
-      Multi_nPC1 = result_multi$nPC_used$nPC1,
-      Multi_nPC2 = result_multi$nPC_used$nPC2,
-      Multi_MISE1 = result_multi$performance$MISE1,
-      Multi_Coverage1 = result_multi$performance$Coverage1,
-      Multi_MISE2 = result_multi$performance$MISE2,
-      Multi_Coverage2 = result_multi$performance$Coverage2,
-      Separate_nPC1 = result_separate$exposure1$nPC_used,
-      Separate_nPC2 = result_separate$exposure2$nPC_used,
-      Separate_MISE1 = result_separate$exposure1$performance$MISE,
-      Separate_Coverage1 = result_separate$exposure1$performance$Coverage,
-      Separate_MISE2 = result_separate$exposure2$performance$MISE,
-      Separate_Coverage2 = result_separate$exposure2$performance$Coverage
+      Multi_nPC1 = result_multi$nPC_used[1],
+      Multi_nPC2 = result_multi$nPC_used[2],
+      Multi_MISE1 = result_multi$performance$MISE[[1]],
+      Multi_Coverage1 = result_multi$performance$Coverage[[1]],
+      Multi_MISE2 = result_multi$performance$MISE[[2]],
+      Multi_Coverage2 = result_multi$performance$Coverage[[2]],
+      Separate_nPC1 = result_separate$exposures[[1]]$nPC_used,
+      Separate_nPC2 = result_separate$exposures[[2]]$nPC_used,
+      Separate_MISE1 = result_separate$exposures[[1]]$performance$MISE,
+      Separate_Coverage1 = result_separate$exposures[[1]]$performance$Coverage,
+      Separate_MISE2 = result_separate$exposures[[2]]$performance$MISE,
+      Separate_Coverage2 = result_separate$exposures[[2]]$performance$Coverage
     )
-    
+
     results_all <- rbind(results_all, temp_res)
   }
 }
@@ -208,33 +200,32 @@ XY_grid <- expand.grid(X1 = X1Ymodel_vec, X2 = X2Ymodel_vec)
 for (i in 1:nrow(XY_grid)) {
   for (sim in 1:n_sim) {
     cat(paste0("Scenario 2 - Grid ", i, "/", nrow(XY_grid), " - Sim ", sim, "/", n_sim, "\n"))
-    
+
     set.seed(sim * 23456)
-    
+
     # Generate data
     RES <- getX_multi_exposure(
       N = N,
       J = J,
       nSparse = nSparse,
+      n_exposures = 2,
       shared_effect = TRUE,
       separate_G = TRUE,
       shared_G_proportion = 0.15
     )
-    
+
     # FPCA
-    res1 <- FPCA(RES$X1$Ly_sim, RES$X1$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    res2 <- FPCA(RES$X2$Ly_sim, RES$X2$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    
+    res1 <- FPCA(RES$exposures[[1]]$Ly_sim, RES$exposures[[1]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+    res2 <- FPCA(RES$exposures[[2]]$Ly_sim, RES$exposures[[2]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+
     # Generate outcome - X2 has NO effect
     DAT <- getY_multi_exposure(
       RES,
-      X1Ymodel = XY_grid[i, "X1"],
-      X2Ymodel = XY_grid[i, "X2"],  # "0" = null
-      X1_effect = TRUE,
-      X2_effect = FALSE,  # X2 has no effect
+      XYmodels = c(XY_grid[i, "X1"], XY_grid[i, "X2"]),  # X2 model "0" = null
+      X_effects = c(TRUE, FALSE),  # X2 has no effect
       outcome_type = "continuous"
     )
-    
+
     # Calculate IS statistics
     K_total <- res1$selectK + res2$selectK
     IS_multi <- IS(
@@ -246,7 +237,7 @@ for (i in 1:nrow(XY_grid)) {
         cbind(res1$xiEst[, 1:res1$selectK], res2$xiEst[, 1:res2$selectK])
       )
     )
-    
+
     IS_multi_df <- as.data.frame(IS_multi) %>%
       mutate(
         Exposure = c(rep("X1", res1$selectK), rep("X2", res2$selectK)),
@@ -257,21 +248,21 @@ for (i in 1:nrow(XY_grid)) {
         X2Ymodel = XY_grid[i, "X2"],
         Approach = "Multivariable"
       )
-    
+
     IS_sep1 <- IS(
-      J = ncol(RES$details$G1),
+      J = ncol(RES$details$G_list[[1]]),
       K = res1$selectK,
       PC = 1:res1$selectK,
-      datafull = cbind(RES$details$G1, res1$xiEst[, 1:res1$selectK])
+      datafull = cbind(RES$details$G_list[[1]], res1$xiEst[, 1:res1$selectK])
     )
-    
+
     IS_sep2 <- IS(
-      J = ncol(RES$details$G2),
+      J = ncol(RES$details$G_list[[2]]),
       K = res2$selectK,
       PC = 1:res2$selectK,
-      datafull = cbind(RES$details$G2, res2$xiEst[, 1:res2$selectK])
+      datafull = cbind(RES$details$G_list[[2]], res2$xiEst[, 1:res2$selectK])
     )
-    
+
     IS_sep_df <- rbind(
       as.data.frame(IS_sep1) %>%
         mutate(
@@ -294,9 +285,9 @@ for (i in 1:nrow(XY_grid)) {
           Approach = "Separate"
         )
     )
-    
+
     isres_all <- rbind(isres_all, IS_multi_df, IS_sep_df)
-    
+
     # Multi approach
     result_multi <- mvfmr(
       G = RES$details$G,
@@ -304,47 +295,40 @@ for (i in 1:nrow(XY_grid)) {
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      )
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"])
     )
-    
+
     # Separate approach
     result_separate <- mvfmr_separate(
-      G1 = RES$details$G1,
-      G2 = RES$details$G2,
+      G_list = list(RES$details$G_list[[1]], RES$details$G_list[[2]]),
       fpca_results = list(res1, res2),
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      )
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"])
     )
-    
+
     # Store results
-    
+
     temp_res <- data.frame(
       Scenario = "Scenario 2: Null effect control",
       Simulation = sim,
       X1Ymodel = XY_grid[i, "X1"],
       X2Ymodel = XY_grid[i, "X2"],
-      Multi_nPC1 = result_multi$nPC_used$nPC1,
-      Multi_nPC2 = result_multi$nPC_used$nPC2,
-      Multi_MISE1 = result_multi$performance$MISE1,
-      Multi_Coverage1 = result_multi$performance$Coverage1,
-      Multi_MISE2 = result_multi$performance$MISE2,
-      Multi_Coverage2 = result_multi$performance$Coverage2,
-      Separate_nPC1 = result_separate$exposure1$nPC_used,
-      Separate_nPC2 = result_separate$exposure2$nPC_used,
-      Separate_MISE1 = result_separate$exposure1$performance$MISE,
-      Separate_Coverage1 = result_separate$exposure1$performance$Coverage,
-      Separate_MISE2 = result_separate$exposure2$performance$MISE,
-      Separate_Coverage2 = result_separate$exposure2$performance$Coverage
+      Multi_nPC1 = result_multi$nPC_used[1],
+      Multi_nPC2 = result_multi$nPC_used[2],
+      Multi_MISE1 = result_multi$performance$MISE[[1]],
+      Multi_Coverage1 = result_multi$performance$Coverage[[1]],
+      Multi_MISE2 = result_multi$performance$MISE[[2]],
+      Multi_Coverage2 = result_multi$performance$Coverage[[2]],
+      Separate_nPC1 = result_separate$exposures[[1]]$nPC_used,
+      Separate_nPC2 = result_separate$exposures[[2]]$nPC_used,
+      Separate_MISE1 = result_separate$exposures[[1]]$performance$MISE,
+      Separate_Coverage1 = result_separate$exposures[[1]]$performance$Coverage,
+      Separate_MISE2 = result_separate$exposures[[2]]$performance$MISE,
+      Separate_Coverage2 = result_separate$exposures[[2]]$performance$Coverage
     )
-    
+
     results_all <- rbind(results_all, temp_res)
   }
 }
@@ -364,37 +348,42 @@ X2Ymodel_vec <- c("2", "8")
 
 XY_grid <- expand.grid(X1 = X1Ymodel_vec, X2 = X2Ymodel_vec)
 
+# Mediation: exposure 1 mediates onto exposure 2 with strength 0.3.
+# mediation_strength[j, k] is the strength with which exposure j mediates
+# its effect onto exposure k (only entries with j < k may be nonzero).
+mediation_strength <- matrix(0, 2, 2)
+mediation_strength[1, 2] <- 0.3
+
 for (i in 1:nrow(XY_grid)) {
   for (sim in 1:n_sim) {
-    cat(paste0("Scenario 3 - Grid ", i, "/", nrow(XY_grid), 
+    cat(paste0("Scenario 3 - Grid ", i, "/", nrow(XY_grid),
                " - Sim ", sim, "/", n_sim, "\n"))
-    
+
     set.seed(sim * 34567)
-    
+
     # Generate data with mediation
     RES <- getX_multi_exposure_mediation(
       N = N,
       J = J,
       nSparse = nSparse,
-      mediation_strength = 0.3,
+      n_exposures = 2,
+      mediation_strength = mediation_strength,
       separate_G = TRUE,
       shared_G_proportion = 0.15
     )
-    
+
     # FPCA
-    res1 <- FPCA(RES$X1$Ly_sim, RES$X1$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    res2 <- FPCA(RES$X2$Ly_sim, RES$X2$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
-    
+    res1 <- FPCA(RES$exposures[[1]]$Ly_sim, RES$exposures[[1]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+    res2 <- FPCA(RES$exposures[[2]]$Ly_sim, RES$exposures[[2]]$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+
     # Generate outcome
     DAT <- getY_multi_exposure(
       RES,
-      X1Ymodel = XY_grid[i, "X1"],
-      X2Ymodel = XY_grid[i, "X2"],
-      X1_effect = TRUE,
-      X2_effect = TRUE,
+      XYmodels = c(XY_grid[i, "X1"], XY_grid[i, "X2"]),
+      X_effects = c(TRUE, TRUE),
       outcome_type = "continuous"
     )
-    
+
     # Calculate IS statistics
     K_total <- res1$selectK + res2$selectK
     IS_multi <- IS(
@@ -406,7 +395,7 @@ for (i in 1:nrow(XY_grid)) {
         cbind(res1$xiEst[, 1:res1$selectK], res2$xiEst[, 1:res2$selectK])
       )
     )
-    
+
     IS_multi_df <- as.data.frame(IS_multi) %>%
       mutate(
         Exposure = c(rep("X1", res1$selectK), rep("X2", res2$selectK)),
@@ -417,21 +406,21 @@ for (i in 1:nrow(XY_grid)) {
         X2Ymodel = XY_grid[i, "X2"],
         Approach = "Multivariable"
       )
-    
+
     IS_sep1 <- IS(
-      J = ncol(RES$details$G1),
+      J = ncol(RES$details$G_list[[1]]),
       K = res1$selectK,
       PC = 1:res1$selectK,
-      datafull = cbind(RES$details$G1, res1$xiEst[, 1:res1$selectK])
+      datafull = cbind(RES$details$G_list[[1]], res1$xiEst[, 1:res1$selectK])
     )
-    
+
     IS_sep2 <- IS(
-      J = ncol(RES$details$G2),
+      J = ncol(RES$details$G_list[[2]]),
       K = res2$selectK,
       PC = 1:res2$selectK,
-      datafull = cbind(RES$details$G2, res2$xiEst[, 1:res2$selectK])
+      datafull = cbind(RES$details$G_list[[2]], res2$xiEst[, 1:res2$selectK])
     )
-    
+
     IS_sep_df <- rbind(
       as.data.frame(IS_sep1) %>%
         mutate(
@@ -454,9 +443,9 @@ for (i in 1:nrow(XY_grid)) {
           Approach = "Separate"
         )
     )
-    
+
     isres_all <- rbind(isres_all, IS_multi_df, IS_sep_df)
-    
+
     # Multi approach
     result_multi <- mvfmr(
       G = RES$details$G,
@@ -464,53 +453,46 @@ for (i in 1:nrow(XY_grid)) {
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      )
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"])
     )
-    
+
     # Separate approach
     result_separate <- mvfmr_separate(
-      G1 = RES$details$G1,
-      G2 = RES$details$G2,
+      G_list = list(RES$details$G_list[[1]], RES$details$G_list[[2]]),
       fpca_results = list(res1, res2),
       Y = DAT$Y,
       outcome_type = "continuous",
       method = "gmm",
-      true_effects = list(
-        model1 = XY_grid[i, "X1"],
-        model2 = XY_grid[i, "X2"]
-      )
+      true_effects = c(XY_grid[i, "X1"], XY_grid[i, "X2"])
     )
-    
+
     # Store results
     temp_res <- data.frame(
       Scenario = "Scenario 3: Mediation model",
       Simulation = sim,
       X1Ymodel = XY_grid[i, "X1"],
       X2Ymodel = XY_grid[i, "X2"],
-      Multi_nPC1 = result_multi$nPC_used$nPC1,
-      Multi_nPC2 = result_multi$nPC_used$nPC2,
-      Multi_MISE1 = result_multi$performance$MISE1,
-      Multi_Coverage1 = result_multi$performance$Coverage1,
-      Multi_MISE2 = result_multi$performance$MISE2,
-      Multi_Coverage2 = result_multi$performance$Coverage2,
-      Separate_nPC1 = result_separate$exposure1$nPC_used,
-      Separate_nPC2 = result_separate$exposure2$nPC_used,
-      Separate_MISE1 = result_separate$exposure1$performance$MISE,
-      Separate_Coverage1 = result_separate$exposure1$performance$Coverage,
-      Separate_MISE2 = result_separate$exposure2$performance$MISE,
-      Separate_Coverage2 = result_separate$exposure2$performance$Coverage
+      Multi_nPC1 = result_multi$nPC_used[1],
+      Multi_nPC2 = result_multi$nPC_used[2],
+      Multi_MISE1 = result_multi$performance$MISE[[1]],
+      Multi_Coverage1 = result_multi$performance$Coverage[[1]],
+      Multi_MISE2 = result_multi$performance$MISE[[2]],
+      Multi_Coverage2 = result_multi$performance$Coverage[[2]],
+      Separate_nPC1 = result_separate$exposures[[1]]$nPC_used,
+      Separate_nPC2 = result_separate$exposures[[2]]$nPC_used,
+      Separate_MISE1 = result_separate$exposures[[1]]$performance$MISE,
+      Separate_Coverage1 = result_separate$exposures[[1]]$performance$Coverage,
+      Separate_MISE2 = result_separate$exposures[[2]]$performance$MISE,
+      Separate_Coverage2 = result_separate$exposures[[2]]$performance$Coverage
     )
-    
+
     results_all <- rbind(results_all, temp_res)
   }
 }
 
 # ============= SAVE RESULTS # =============
 
-# Use tempdir() 
+# Use tempdir()
 output_dir <- tempdir()
 write.csv(results_all, file.path(output_dir, "paper_scenarios_results.csv"), row.names = FALSE)
 write.csv(isres_all, file.path(output_dir, "paper_scenarios_IS_statistics.csv"), row.names = FALSE)
@@ -535,7 +517,7 @@ summary_stats <- results_all %>%
     Multi_MISE2_mean = mean(Multi_MISE2, na.rm = TRUE),
     Multi_MISE2_sd = sd(Multi_MISE2, na.rm = TRUE),
     Multi_Coverage2_mean = mean(Multi_Coverage2, na.rm = TRUE),
-    
+
     # Separate (U-FMR)
     Separate_MISE1_mean = mean(Separate_MISE1, na.rm = TRUE),
     Separate_MISE1_sd = sd(Separate_MISE1, na.rm = TRUE),
@@ -543,7 +525,7 @@ summary_stats <- results_all %>%
     Separate_MISE2_mean = mean(Separate_MISE2, na.rm = TRUE),
     Separate_MISE2_sd = sd(Separate_MISE2, na.rm = TRUE),
     Separate_Coverage2_mean = mean(Separate_Coverage2, na.rm = TRUE),
-    
+
     .groups = 'drop'
   )
 
@@ -588,7 +570,7 @@ results_all$ModelLabel <- paste0(results_all$X1_label, " vs ", results_all$X2_la
 
 # Reshape for plotting - MISE
 mise_long <- results_all %>%
-  select(Scenario, Simulation, ModelLabel, 
+  select(Scenario, Simulation, ModelLabel,
          Multi_MISE1, Multi_MISE2, Separate_MISE1, Separate_MISE2) %>%
   pivot_longer(
     cols = c(Multi_MISE1, Multi_MISE2, Separate_MISE1, Separate_MISE2),
@@ -621,10 +603,10 @@ p_mise <- ggplot(mise_long, aes(x = ModelLabel, y = MISE, fill = Method)) +
 # Reshape for plotting - Coverage
 coverage_long <- results_all %>%
   select(Scenario, Simulation, ModelLabel,
-         Multi_Coverage1, Multi_Coverage2, 
+         Multi_Coverage1, Multi_Coverage2,
          Separate_Coverage1, Separate_Coverage2) %>%
   pivot_longer(
-    cols = c(Multi_Coverage1, Multi_Coverage2, 
+    cols = c(Multi_Coverage1, Multi_Coverage2,
              Separate_Coverage1, Separate_Coverage2),
     names_to = "Variable",
     values_to = "Coverage"
@@ -666,7 +648,7 @@ cat("  -", file.path(output_dir, "paper_scenarios_Coverage.png"), "\n")
 
 # Format function
 format_mean_sd <- function(mean_val, sd_val, digits = 3) {
-  paste0(format(round(mean_val, digits), nsmall = digits), 
+  paste0(format(round(mean_val, digits), nsmall = digits),
          " (", format(round(sd_val, digits), nsmall = digits), ")")
 }
 

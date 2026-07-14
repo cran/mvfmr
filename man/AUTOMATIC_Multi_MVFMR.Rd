@@ -6,24 +6,19 @@
 \usage{
 AUTOMATIC_Multi_MVFMR(
   Gmatrix,
-  res1 = NA,
-  res2 = NA,
+  res_list,
   Yvector,
   IDmatch = NA,
-  nPC1_selected = NA,
-  max_nPC1 = NA,
-  nPC2_selected = NA,
-  max_nPC2 = NA,
-  X1_true = matrix(),
-  X2_true = matrix(),
+  nPC_selected = NA,
+  max_nPC = NA,
+  X_true = NULL,
   method = "gmm",
   basis = "eigenfunction",
   outcome = "continuous",
   bootstrap = FALSE,
   n_B = 10,
   improvement_threshold = 0.01,
-  X1Ymodel = NA,
-  X2Ymodel = NA,
+  XYmodels = NA,
   num_cores_set = NA,
   verbose = FALSE
 )
@@ -31,25 +26,17 @@ AUTOMATIC_Multi_MVFMR(
 \arguments{
 \item{Gmatrix}{Genetic instrument matrix (N × J)}
 
-\item{res1}{FPCA result for exposure 1}
-
-\item{res2}{FPCA result for exposure 2}
+\item{res_list}{List of length m of FPCA results, one per exposure}
 
 \item{Yvector}{Outcome vector}
 
 \item{IDmatch}{Optional index vector to match rows of Gmatrix and Yvector (default: 1:N)}
 
-\item{nPC1_selected}{Fixed number of principal components to retain for exposure 1 (NA = select automatically)}
+\item{nPC_selected}{Length-m vector: fixed number of principal components to retain per exposure (NA = select automatically)}
 
-\item{max_nPC1}{Maximum number of principal components to consider for exposure 1 during selection}
+\item{max_nPC}{Length-m vector: maximum number of principal components to consider per exposure during selection}
 
-\item{nPC2_selected}{Fixed number of principal components to retain for exposure 2 (NA = select automatically)}
-
-\item{max_nPC2}{Maximum number of principal components to consider for exposure 2 during selection}
-
-\item{X1_true}{Optional: true X1 curves (simulation only)}
-
-\item{X2_true}{Optional: true X2 curves (simulation only)}
+\item{X_true}{Length-m list: optional true X curves per exposure (simulation only), NULL entries allowed}
 
 \item{method}{Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)}
 
@@ -63,9 +50,7 @@ AUTOMATIC_Multi_MVFMR(
 
 \item{improvement_threshold}{Minimum cross-validation improvement required to add an additional principal component}
 
-\item{X1Ymodel}{Optional: true effect model for X1 on Y (simulation only)}
-
-\item{X2Ymodel}{Optional: true effect model for X2 on Y (simulation only)}
+\item{XYmodels}{Length-m vector: optional true effect model for each exposure on Y (simulation only)}
 
 \item{num_cores_set}{Number of CPU cores to use for parallel processing}
 
@@ -76,6 +61,6 @@ List with estimation results, selected components, performance metrics
 }
 \description{
 Core function that performs joint estimation of time-varying causal effects
-from multiple correlated exposures using automatic component selection.
+from m correlated exposures using automatic component selection.
 }
 \keyword{internal}

@@ -10,16 +10,16 @@ print.mvfmr <- function(x, ...) {
   cat("Sample size:", x$n_observations, "\n")
   cat("Outcome:", x$outcome_type, "\n")
   cat("Method:", x$method, "\n")
-  cat("Components selected: nPC1 =", x$nPC_used$nPC1, ", nPC2 =", x$nPC_used$nPC2, "\n")
-  
+  cat("Components selected:", paste(paste0("nPC", seq_len(x$n_exposures), " = ", x$nPC_used), collapse = ", "), "\n")
+
   if (!is.null(x$performance)) {
     cat("\nPerformance Metrics:\n")
-    cat("  Exposure 1 - MISE:", round(x$performance$MISE1, 6), 
-        ", Coverage:", round(x$performance$Coverage1, 3), "\n")
-    cat("  Exposure 2 - MISE:", round(x$performance$MISE2, 6),
-        ", Coverage:", round(x$performance$Coverage2, 3), "\n")
+    for (k in seq_len(x$n_exposures)) {
+      cat("  Exposure", k, "- MISE:", round(x$performance$MISE[[k]], 6),
+          ", Coverage:", round(x$performance$Coverage[[k]], 3), "\n")
+    }
   }
-  
+
   invisible(x)
 }
 
@@ -34,9 +34,9 @@ summary.mvfmr <- function(object, ...) {
 
 #' @export
 plot.mvfmr <- function(x, ...) {
-  if (!is.null(x$plots$p1) && !is.null(x$plots$p2)) {
+  if (!is.null(x$plots$effects) && length(x$plots$effects) > 0) {
     requireNamespace("gridExtra", quietly = TRUE)
-    gridExtra::grid.arrange(x$plots$p1, x$plots$p2, ncol = 2)
+    gridExtra::grid.arrange(grobs = x$plots$effects, ncol = ceiling(sqrt(length(x$plots$effects))))
   } else {
     message("Plots not available in this result object")
   }
@@ -71,68 +71,54 @@ print.mvfmr_separate <- function(x, ...) {
   cat("Separate instruments:", x$separate_instruments, "\n")
   cat("Outcome:", x$outcome_type, "\n")
   cat("Method:", x$method, "\n")
-  
-  cat("\nExposure 1:\n")
-  cat("  Components:", x$exposure1$nPC_used, "\n")
-  if (!is.null(x$exposure1$performance)) {
-    cat("  MSE:", round(x$exposure1$performance$MISE, 6), "\n")
-    cat("  Coverage:", round(x$exposure1$performance$Coverage, 3), "\n")
+
+  for (k in seq_len(x$n_exposures)) {
+    cat("\nExposure", k, ":\n")
+    cat("  Components:", x$exposures[[k]]$nPC_used, "\n")
+    if (!is.null(x$exposures[[k]]$performance)) {
+      cat("  MSE:", round(x$exposures[[k]]$performance$MISE, 6), "\n")
+      cat("  Coverage:", round(x$exposures[[k]]$performance$Coverage, 3), "\n")
+    }
   }
-  
-  if (!is.null(x$exposure2$performance$MISE)) {
-    cat("\nExposure 2:\n")
-    cat("  Components:", x$exposure2$nPC_used, "\n")
-    cat("  MSE:", round(x$exposure2$performance$MISE, 6), "\n")
-    cat("  Coverage:", round(x$exposure2$performance$Coverage, 3), "\n")
-  }
-  
+
   invisible(x)
 }
 
 #' @export
 summary.mvfmr_separate <- function(object, ...) {
   print(object)
-  
-  cat("\nExposure 1 Coefficients:\n")
-  print(round(object$exposure1$coefficients, 4))
-  
-  cat("\nExposure 2 Coefficients:\n")
-  print(round(object$exposure2$coefficients, 4))
-  
+
+  for (k in seq_len(object$n_exposures)) {
+    cat("\nExposure", k, "Coefficients:\n")
+    print(round(object$exposures[[k]]$coefficients, 4))
+  }
+
   invisible(object)
 }
 
 #' @export
 plot.mvfmr_separate <- function(x, ...) {
-  if (!is.null(x$plots$p1) && !is.null(x$plots$p2)) {
+  if (!is.null(x$plots$effects) && length(x$plots$effects) > 0) {
     requireNamespace("gridExtra", quietly = TRUE)
-    gridExtra::grid.arrange(x$plots$p1, x$plots$p2, ncol = 2)
-  } else if(!is.null(x$plots$p1)) {
-    requireNamespace("gridExtra", quietly = TRUE)
-    gridExtra::grid.arrange(x$plots$p1, ncol = 1)
+    gridExtra::grid.arrange(grobs = x$plots$effects, ncol = ceiling(sqrt(length(x$plots$effects))))
   }
   invisible(NULL)
 }
 
 #' @export
-coef.mvfmr_separate <- function(object, exposure = c(1, 2), ...) {
-  exposure <- match.arg(as.character(exposure), c("1", "2"))
-  
-  if (exposure == "1") {
-    return(object$exposure1$coefficients)
-  } else {
-    return(object$exposure2$coefficients)
+coef.mvfmr_separate <- function(object, exposure = 1, ...) {
+  if (!exposure %in% seq_len(object$n_exposures)) {
+    stop("`exposure` must be an integer between 1 and ", object$n_exposures)
   }
+
+  object$exposures[[exposure]]$coefficients
 }
 
 #' @export
-vcov.mvfmr_separate <- function(object, exposure = c(1, 2), ...) {
-  exposure <- match.arg(as.character(exposure), c("1", "2"))
-  
-  if (exposure == "1") {
-    return(object$exposure1$vcov)
-  } else {
-    return(object$exposure2$vcov)
+vcov.mvfmr_separate <- function(object, exposure = 1, ...) {
+  if (!exposure %in% seq_len(object$n_exposures)) {
+    stop("`exposure` must be an integer between 1 and ", object$n_exposures)
   }
-}
 
+  object$exposures[[exposure]]$vcov
+}

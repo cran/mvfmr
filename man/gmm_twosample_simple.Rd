@@ -21,3 +21,12 @@ List with gmm_est, gmm_se, variance_matrix, gmm_pval, Q_stat, Q_df, Q_pval
 \description{
 Two-sample GMM
 }
+\examples{
+set.seed(1)
+J <- 10; K <- 2
+bx <- matrix(rnorm(J * K, sd = 0.3), J, K)
+by <- bx \%*\% c(0.5, -0.2) + rnorm(J, sd = 0.05)
+sy <- runif(J, 0.02, 0.05)
+fit <- gmm_twosample_simple(bx, by, sy, ny = 50000)
+fit$gmm_est
+}

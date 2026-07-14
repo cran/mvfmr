@@ -10,10 +10,8 @@ mvfmr(
   Y,
   outcome_type = c("continuous", "binary"),
   method = c("gmm", "cf", "cf-lasso"),
-  nPC1 = NA,
-  max_nPC1 = NA,
-  nPC2 = NA,
-  max_nPC2 = NA,
+  nPC = NA,
+  max_nPC = NA,
   improvement_threshold = 0.001,
   bootstrap = FALSE,
   n_bootstrap = 100,
@@ -26,7 +24,7 @@ mvfmr(
 \arguments{
 \item{G}{Genetic instrument matrix (N x J)}
 
-\item{fpca_results}{List with two FPCA objects from fdapace (res1 and res2)}
+\item{fpca_results}{List of length m of FPCA objects from fdapace, one per exposure}
 
 \item{Y}{Outcome vector}
 
@@ -34,13 +32,9 @@ mvfmr(
 
 \item{method}{Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)}
 
-\item{nPC1}{Fixed number of principal components to retain for exposure 1 (NA = select automatically)}
+\item{nPC}{Fixed number of principal components to retain per exposure (length 1 or m; NA = select automatically)}
 
-\item{max_nPC1}{Maximum number of principal components to retain for exposure 1 (NA = automatically determined)}
-
-\item{nPC2}{Fixed number of principal components to retain for exposure 2 (NA = select automatically)}
-
-\item{max_nPC2}{Maximum number of principal components to retain for exposure 2 (NA = automatically determined)}
+\item{max_nPC}{Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)}
 
 \item{improvement_threshold}{Minimum cross-validation improvement required to add an additional principal component}
 
@@ -50,9 +44,9 @@ mvfmr(
 
 \item{n_cores}{Number of CPU cores to use for parallel computations}
 
-\item{true_effects}{List with true_effect1 and true_effect2 (simulation only)}
+\item{true_effects}{Length-m vector of true effect model codes, one per exposure (simulation only)}
 
-\item{X_true}{List with X1_true and X2_true curves (simulation only)}
+\item{X_true}{Length-m list of true X curves, one per exposure (simulation only)}
 
 \item{verbose}{Print progress and diagnostic messages during computation}
 }
@@ -61,12 +55,30 @@ mvfmr object with:
 \itemize{
   \item coefficients - Estimated beta coefficients
   \item vcov - Variance-covariance matrix
-  \item effects - List with effect1 and effect2 curves
-  \item nPC_used - Components selected (nPC1, nPC2)
+  \item effects - List of length m with the estimated time-varying effect curves
+  \item nPC_used - Components selected per exposure
   \item diagnostics - F-statistics, instrument diagnostics
   \item performance - MISE, coverage (if true effects provided)
 }
 }
 \description{
 Joint Multivariable Functional Mendelian Randomization
+}
+\examples{
+set.seed(1)
+sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+                list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+})
+result <- mvfmr(
+  G = sim_data$details$G,
+  fpca_results = fpca_results,
+  Y = outcome_data$Y,
+  max_nPC = c(2, 2),
+  n_cores = 1,
+  verbose = FALSE
+)
+coef(result)
 }

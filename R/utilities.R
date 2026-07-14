@@ -5,10 +5,44 @@
 if(getRversion() >= "2.15.1") {
   utils::globalVariables(c(
     "Beta", "CI_Lower_Trad", "CI_Upper_Trad", "X_axis",
-    "effect", "effect1_low", "effect1_up", "effect2_low", "effect2_up",
-    "effect_low", "effect_up", "time",
-    "true_shape", "true_shape1", "true_shape2"
+    "effect", "effect_low", "effect_up", "time",
+    "true_shape"
   ))
+}
+
+#' Compute cumulative block offsets for m stacked exposure blocks (internal)
+#'
+#' @param nPC_vec Integer vector of length m, number of components per exposure
+#' @return Integer vector of length m+1: c(0, cumsum(nPC_vec))
+#' @keywords internal
+compute_offsets <- function(nPC_vec) {
+  c(0, cumsum(nPC_vec))
+}
+
+#' Get the index range for exposure k's block in a stacked vector (internal)
+#'
+#' @param offsets Output of compute_offsets()
+#' @param k Exposure index (1-based)
+#' @return Integer vector of indices for exposure k's block
+#' @keywords internal
+block_idx <- function(offsets, k) {
+  (offsets[k] + 1):offsets[k + 1]
+}
+
+#' Recycle a per-exposure scalar argument to length m (internal)
+#'
+#' @param x NULL, a single value, or a vector of length m
+#' @param m Number of exposures
+#' @param default Value used to fill each of the m entries when x is NULL
+#' @return Vector of length m
+#' @keywords internal
+recycle_arg <- function(x, m, default = NA) {
+  if (is.null(x)) return(rep(default, m))
+  if (length(x) == 1) return(rep(x, m))
+  if (length(x) != m) {
+    stop("Argument must have length 1 or length equal to the number of exposures (", m, "), got length ", length(x), ".")
+  }
+  x
 }
 
 #' Calculate F-statistics and Q-statistic for instrument strength (internal)
@@ -19,6 +53,14 @@ if(getRversion() >= "2.15.1") {
 #' @param datafull Data frame containing instruments (first J columns) and principal components (subsequent columns) [G, X]
 #' @param Y Optional outcome vector; if provided, Q-statistic for overidentification is calculated)
 #' @return Matrix with columns: PC (component index), RR (R-squared), FF (F-statistic), cFF (conditional F-statistic). If Y is provided, additional columns: Qvalue (Hansen's J overidentification test statistic), df (degrees of freedom for Q-test), pvalue (p-value for Q-test from chi-squared distribution).
+#' @examples
+#' set.seed(1)
+#' n <- 200; J <- 5; K <- 2
+#' G <- matrix(rbinom(n * J, 2, 0.3), n, J)
+#' PCmat <- G[, 1:K] + matrix(rnorm(n * K, sd = 0.5), n, K)
+#' Y <- as.numeric(PCmat %*% c(1, -0.5) + rnorm(n))
+#' fstats <- IS(J = J, K = K, PC = 1:K, datafull = cbind(G, PCmat), Y = Y)
+#' fstats
 #' @export
 IS <- function(J, K, PC, datafull, Y = NULL) {
   X <- data.matrix(datafull)

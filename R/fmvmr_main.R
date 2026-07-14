@@ -3,41 +3,54 @@
 #' Joint Multivariable Functional Mendelian Randomization
 #'
 #' @param G Genetic instrument matrix (N x J)
-#' @param fpca_results List with two FPCA objects from fdapace (res1 and res2)
+#' @param fpca_results List of length m of FPCA objects from fdapace, one per exposure
 #' @param Y Outcome vector
 #' @param outcome_type Type of outcome: "continuous" for numeric outcomes, "binary" for 0/1 outcomes
 #' @param method Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)
-#' @param nPC1 Fixed number of principal components to retain for exposure 1 (NA = select automatically)
-#' @param max_nPC1 Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-#' @param nPC2 Fixed number of principal components to retain for exposure 2 (NA = select automatically)
-#' @param max_nPC2 Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
+#' @param nPC Fixed number of principal components to retain per exposure (length 1 or m; NA = select automatically)
+#' @param max_nPC Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)
 #' @param improvement_threshold Minimum cross-validation improvement required to add an additional principal component
 #' @param bootstrap Whether to compute confidence intervals using bootstrap resampling
 #' @param n_bootstrap Number of bootstrap replicates (only used if bootstrap = TRUE)
 #' @param n_cores Number of CPU cores to use for parallel computations
-#' @param true_effects List with true_effect1 and true_effect2 (simulation only)
-#' @param X_true List with X1_true and X2_true curves (simulation only)
+#' @param true_effects Length-m vector of true effect model codes, one per exposure (simulation only)
+#' @param X_true Length-m list of true X curves, one per exposure (simulation only)
 #' @param verbose Print progress and diagnostic messages during computation
 #'
 #' @return mvfmr object with:
 #' \itemize{
 #'   \item coefficients - Estimated beta coefficients
 #'   \item vcov - Variance-covariance matrix
-#'   \item effects - List with effect1 and effect2 curves
-#'   \item nPC_used - Components selected (nPC1, nPC2)
+#'   \item effects - List of length m with the estimated time-varying effect curves
+#'   \item nPC_used - Components selected per exposure
 #'   \item diagnostics - F-statistics, instrument diagnostics
 #'   \item performance - MISE, coverage (if true effects provided)
 #' }
-#' @export 
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+#' outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+#' fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+#'   fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+#'                 list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+#' })
+#' result <- mvfmr(
+#'   G = sim_data$details$G,
+#'   fpca_results = fpca_results,
+#'   Y = outcome_data$Y,
+#'   max_nPC = c(2, 2),
+#'   n_cores = 1,
+#'   verbose = FALSE
+#' )
+#' coef(result)
+#' @export
 mvfmr <- function(G,
                   fpca_results,
                   Y,
                   outcome_type = c("continuous", "binary"),
                   method = c("gmm", "cf", "cf-lasso"),
-                  nPC1 = NA,
-                  max_nPC1 = NA,
-                  nPC2 = NA,
-                  max_nPC2 = NA,
+                  nPC = NA,
+                  max_nPC = NA,
                   improvement_threshold = 0.001,
                   bootstrap = FALSE,
                   n_bootstrap = 100,
@@ -45,156 +58,142 @@ mvfmr <- function(G,
                   true_effects = NULL,
                   X_true = NULL,
                   verbose = FALSE) {
-  
+
   outcome_type <- match.arg(outcome_type)
   method <- match.arg(method)
-  
+
   # ---- Check outcome if binary ----
   if (outcome_type == "binary") {
     if (!is.numeric(Y)) {
       stop("For binary outcome, Y must be numeric and coded as 0/1.")
     }
-    
+
     Y_unique <- unique(na.omit(Y))
-    
+
     if (!all(Y_unique %in% c(0, 1))) {
       stop(
         "For binary outcome, Y must contain only values 0 and 1. "
       )
     }
   }
-  
+
   # Extract FPCA objects
-  if (!is.list(fpca_results) || length(fpca_results) != 2) {
-    stop("fpca_results must be a list with 2 FPCA objects (res1, res2)")
+  if (!is.list(fpca_results) || length(fpca_results) < 1) {
+    stop("fpca_results must be a list of m FPCA objects")
   }
-  
-  res1 <- fpca_results[[1]]
-  res2 <- fpca_results[[2]]
-  
+
+  m <- length(fpca_results)
+
   # Extract true effects if provided
-  X1Ymodel <- NA
-  X2Ymodel <- NA
-  X1_true_mat <- matrix()
-  X2_true_mat <- matrix()
-  
-  if (!is.null(true_effects)) {
-    X1Ymodel <- true_effects$model1
-    X2Ymodel <- true_effects$model2
-  }
-  
-  if (!is.null(X_true)) {
-    X1_true_mat <- X_true$X1_true
-    X2_true_mat <- X_true$X2_true
-  }
-  
+  XYmodels <- recycle_arg(true_effects, m, default = NA)
+  X_true_list <- if (!is.null(X_true)) X_true else vector("list", m)
+
   N <- nrow(G)
   IDmatch <- 1:N
-  
+
   if (verbose) {
     cat("\n=== Functional Multivariable MR ===\n")
     cat("Sample size:", N, "\n")
+    cat("Exposures:", m, "\n")
     cat("Outcome:", outcome_type, "\n")
     cat("Method:", method, "\n\n")
   }
-  
+
   # Call original AUTOMATIC_Multi_MVFMR function
   result <- AUTOMATIC_Multi_MVFMR(
     Gmatrix = G,
-    res1 = res1,
-    res2 = res2,
+    res_list = fpca_results,
     Yvector = Y,
     IDmatch = IDmatch,
-    nPC1_selected = NA,
-    max_nPC1 = max_nPC1,
-    nPC2_selected = NA,
-    max_nPC2 = max_nPC2,
-    X1_true = X1_true_mat,
-    X2_true = X2_true_mat,
+    nPC_selected = NA,
+    max_nPC = max_nPC,
+    X_true = X_true_list,
     method = method,
     basis = "eigenfunction",
     outcome = outcome_type,
     bootstrap = bootstrap,
     n_B = n_bootstrap,
     improvement_threshold = improvement_threshold,
-    X1Ymodel = X1Ymodel,
-    X2Ymodel = X2Ymodel,
+    XYmodels = XYmodels,
     num_cores_set = n_cores,
     verbose = verbose
   )
-  
+
   # Reformat output to package standard
   out <- structure(
     list(
       coefficients = result$MPCMRest,
       vcov = result$MPCMRvar,
-      effects = list(
-        effect1 = if (!is.null(result$ggdata)) result$ggdata$effect1 else NULL,
-        effect2 = if (!is.null(result$ggdata)) result$ggdata$effect2 else NULL,
-        time_grid = if (!is.null(result$ggdata)) result$ggdata$time else NULL
-      ),
+      effects = lapply(result$ggdata, function(g) g$effect),
+      time_grid = result$ggdata[[1]]$time,
       confidence_intervals = list(
-        effect1_lower = if (!is.null(result$ggdata)) result$ggdata$effect1_low else NULL,
-        effect1_upper = if (!is.null(result$ggdata)) result$ggdata$effect1_up else NULL,
-        effect2_lower = if (!is.null(result$ggdata)) result$ggdata$effect2_low else NULL,
-        effect2_upper = if (!is.null(result$ggdata)) result$ggdata$effect2_up else NULL
+        lower = lapply(result$ggdata, function(g) g$effect_low),
+        upper = lapply(result$ggdata, function(g) g$effect_up)
       ),
-      nPC_used = list(nPC1 = result$nPC1_used, nPC2 = result$nPC2_used),
-      performance = if (!is.null(X1Ymodel)) {
-        list(
-          MISE1 = result$MISE1,
-          MISE2 = result$MISE2,
-          Coverage1 = result$Coverage_rate1,
-          Coverage2 = result$Coverage_rate2
-        )
+      nPC_used = result$nPC_used,
+      offsets = result$offsets,
+      performance = if (!is.null(result$MISE)) {
+        list(MISE = result$MISE, Coverage = result$Coverage_rate)
       } else NULL,
-      plots = list(p1 = result$p1, p2 = result$p2, plot_beta = result$plot_beta),
+      plots = list(effects = result$p, plot_beta = result$plot_beta),
       raw_result = result,
-      n_exposures = 2,
+      n_exposures = m,
       outcome_type = outcome_type,
       method = method,
       n_observations = N
     ),
     class = "mvfmr"
   )
-  
+
   if (verbose) cat("=== Estimation complete ===\n\n")
-  
+
   return(out)
 }
 
 #' Separate Univariable Functional Mendelian Randomization
 #'
-#' @param G1  Genetic instrument matrix for exposure 1
-#' @param G2  Genetic instrument matrix for exposure 2, or NULL if only a single exposure is analyzed
-#' @param fpca_results List of FPCA objects
+#' @param G_list List of length m of genetic instrument matrices, one per exposure. Use a
+#'   list of length 1 to analyze a single exposure.
+#' @param fpca_results List of length m of FPCA objects, same length as G_list
 #' @param Y Outcome vector
 #' @param outcome_type Type of outcome: "continuous" for numeric outcomes, "binary" for 0/1 outcomes
 #' @param method Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)
-#' @param nPC1 Fixed number of principal components to retain for exposure 1 (NA = select automatically)
-#' @param max_nPC1 Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-#' @param nPC2 Fixed number of principal components to retain for exposure 2 (NA = select automatically)
-#' @param max_nPC2 Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
+#' @param nPC Fixed number of principal components to retain per exposure (length 1 or m; NA = select automatically)
+#' @param max_nPC Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)
 #' @param improvement_threshold Minimum cross-validation improvement required to add an additional principal component
 #' @param bootstrap Whether to compute confidence intervals using bootstrap resampling
 #' @param n_bootstrap Number of bootstrap replicates (only used if bootstrap = TRUE)
 #' @param n_cores Number of CPU cores to use for parallel computations
-#' @param true_effects List with true_effect1 and true_effect2 (simulation only)
-#' @param X_true List with X1_true and X2_true curves (simulation only)
+#' @param true_effects Length-m vector of true effect model codes, one per exposure (simulation only)
+#' @param X_true Length-m list of true X curves, one per exposure (simulation only)
 #' @param verbose Print progress and diagnostic messages during computation
 #'
-#' @return fmvmr_separate object
-#' @export 
-mvfmr_separate <- function(G1,
-                           G2,
+#' @return mvfmr_separate object
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+#' outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+#' fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+#'   fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+#'                 list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+#' })
+#' result <- mvfmr_separate(
+#'   G_list = list(sim_data$details$G, sim_data$details$G),
+#'   fpca_results = fpca_results,
+#'   Y = outcome_data$Y,
+#'   max_nPC = c(2, 2),
+#'   n_cores = 1,
+#'   verbose = FALSE
+#' )
+#' coef(result, exposure = 1)
+#' @export
+mvfmr_separate <- function(G_list,
                            fpca_results,
                            Y,
                            outcome_type = c("continuous", "binary"),
                            method = c("gmm", "cf", "cf-lasso"),
-                           nPC1 = NA,
-                           max_nPC1 = NA,
-                           nPC2 = NA,
-                           max_nPC2 = NA,
+                           nPC = NA,
+                           max_nPC = NA,
                            improvement_threshold = 0.001,
                            bootstrap = FALSE,
                            n_bootstrap = 100,
@@ -202,83 +201,55 @@ mvfmr_separate <- function(G1,
                            true_effects = NULL,
                            X_true = NULL,
                            verbose = FALSE) {
-  
+
   outcome_type <- match.arg(outcome_type)
   method <- match.arg(method)
-  
+
   # ---- Check outcome if binary ----
   if (outcome_type == "binary") {
     if (!is.numeric(Y)) {
       stop("For binary outcome, Y must be numeric and coded as 0/1.")
     }
-    
+
     Y_unique <- unique(na.omit(Y))
-    
+
     if (!all(Y_unique %in% c(0, 1))) {
       stop(
         "For binary outcome, Y must contain only values 0 and 1. "
       )
     }
   }
-  
-  # Extract FPCA objects
-  if (!is.list(fpca_results) || (!is.null(G2) & length(fpca_results) != 2)) {
-    stop("fpca_results must be a list with 2 FPCA objects")
+
+  if (!is.list(G_list) || length(G_list) < 1) {
+    stop("G_list must be a list of m genetic instrument matrices")
   }
-  # Extract FPCA objects
-  if (!is.list(fpca_results) || (is.null(G2) & length(fpca_results) != 1)) {
-    stop("fpca_results must be a list with 1 FPCA objects")
+
+  m <- length(G_list)
+
+  if (!is.list(fpca_results) || length(fpca_results) != m) {
+    stop("fpca_results must be a list with the same length as G_list (", m, ")")
   }
-  
-  
-  # Handle G: single matrix or list
-  if (!is.null(G1)) {
-    separate_G <- TRUE
-    Gmatrix1 <- G1
-    res1 <- fpca_results[[1]]
-  } else{
-    Gmatrix1 <- NULL
-    res1 <- NULL
-  }
-  if (!is.null(G2)) {
-    separate_G <- TRUE
-    Gmatrix2 <- G2
-    res2 <- fpca_results[[2]]
-  }else{
-    Gmatrix2 <- NULL
-    res2 <- NULL
-  }
-  
+
   # Extract true effects if provided
-  X1Ymodel <- NA
-  X2Ymodel <- NA
-  X1_true_mat <- matrix()
-  X2_true_mat <- matrix()
-  
-  if (!is.null(true_effects)) {
-    X1Ymodel <- true_effects$model1
-    X2Ymodel <- true_effects$model2
-  }
-  
-  N <- nrow(Gmatrix1)
+  XYmodels <- recycle_arg(true_effects, m, default = NA)
+  X_true_list <- if (!is.null(X_true)) X_true else vector("list", m)
+
+  N <- nrow(G_list[[1]])
   IDmatch <- 1:N
-  
+
   if (verbose) {
     cat("\n=== Separate Univariable MR ===\n")
-    cat("Separate instruments:", separate_G, "\n")
+    cat("Exposures:", m, "\n")
     cat("Sample size:", N, "\n\n")
   }
-  
+
   # Call original Separate_Multi_MVFMR function
   result <- Separate_Multi_MVFMR(
-    Gmatrix1 = Gmatrix1,
-    Gmatrix2 = Gmatrix2,
-    res1 = res1,
-    res2 = res2,
-    nPC1_selected = nPC1,
-    max_nPC1 = max_nPC1,
-    nPC2_selected = nPC2,
-    max_nPC2 = max_nPC2,
+    Gmatrix_list = G_list,
+    res_list = fpca_results,
+    nPC_selected = nPC,
+    max_nPC = max_nPC,
+    X_true = X_true_list,
     Yvector = Y,
     IDmatch = IDmatch,
     method = method,
@@ -287,45 +258,39 @@ mvfmr_separate <- function(G1,
     bootstrap = bootstrap,
     n_B = n_bootstrap,
     improvement_threshold = improvement_threshold,
-    X1Ymodel = X1Ymodel,
-    X2Ymodel = X2Ymodel,
+    XYmodels = XYmodels,
     num_cores_set = n_cores,
     verbose = verbose
   )
-  
+
   # Reformat output
+  exposures <- lapply(seq_len(m), function(k) {
+    list(
+      coefficients = result$MPCMRest[[k]],
+      vcov = result$MPCMRvar[[k]],
+      effect = result$ggdata[[k]]$effect,
+      nPC_used = result$nPC_used[[k]],
+      performance = if (!is.null(result$MISE[[k]])) {
+        list(MISE = result$MISE[[k]], Coverage = result$Coverage_rate[[k]])
+      } else NULL
+    )
+  })
+
   out <- structure(
     list(
-      exposure1 = list(
-        coefficients = result$MPCMRest1,
-        vcov = result$MPCMRvar1,
-        effect = if (!is.null(result$ggdata1)) result$ggdata1$effect else NULL,
-        nPC_used = result$nPC_used1,
-        performance = if (!is.null(X1Ymodel)) {
-          list(MISE = result$MISE1, Coverage = result$Coverage_rate1)
-        } else NULL
-      ),
-      exposure2 = list(
-        coefficients = result$MPCMRest2,
-        vcov = result$MPCMRvar2,
-        effect = if (!is.null(result$ggdata2)) result$ggdata2$effect else NULL,
-        nPC_used = result$nPC_used2,
-        performance = if (!is.null(X2Ymodel)) {
-          list(MISE = result$MISE2, Coverage = result$Coverage_rate2)
-        } else NULL
-      ),
-      plots = list(p1 = result$p1, p2 = result$p2),
+      exposures = exposures,
+      plots = list(effects = result$p),
       raw_result = result,
-      n_exposures = sum(!is.null(G1), !is.null(G2)),
-      separate_instruments = separate_G,
+      n_exposures = m,
+      separate_instruments = TRUE,
       outcome_type = outcome_type,
       method = method
     ),
     class = "mvfmr_separate"
   )
-  
+
   if (verbose) cat("=== Univariable estimation complete ===\n\n")
-  
+
   return(out)
 }
 
@@ -339,106 +304,113 @@ mvfmr_separate <- function(G1,
 #' Simplified approach: only needs by, sy, ny (not individual outcome data).
 #'
 #' @param G_exposure Genetic instrument matrix from the exposure sample (N × J)
-#' @param fpca_results List of 2 FPCA objects 
+#' @param fpca_results List of length m of FPCA objects, one per exposure
 #' @param by_outcome Vector of SNP-outcome effect estimates (betas) from the outcome GWAS, length J
 #' @param sy_outcome VVector of standard errors for SNP-outcome effects, length J
 #' @param ny_outcome Sample size of the outcome GWAS
-#' @param max_nPC1 Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-#' @param max_nPC2 Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
-#' @param true_effects List containing true effects for exposure 1 and exposure 2 (simulation only)
+#' @param max_nPC Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)
+#' @param true_effects Length-m vector of true effect model codes, one per exposure (simulation only)
 #' @param verbose Print progress messages and diagnostics during computation
 #'
 #' @return fmvmr_twosample object
-#' @export 
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+#' outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+#' fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+#'   fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+#'                 list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+#' })
+#' # Simulate outcome GWAS summary statistics for the two-sample design
+#' by_outcome <- sapply(1:8, function(j) {
+#'   coef(lm(outcome_data$Y ~ sim_data$details$G[, j]))[2]
+#' })
+#' sy_outcome <- sapply(1:8, function(j) {
+#'   summary(lm(outcome_data$Y ~ sim_data$details$G[, j]))$coefficients[2, 2]
+#' })
+#' result <- fmvmr_twosample(
+#'   G_exposure = sim_data$details$G,
+#'   fpca_results = fpca_results,
+#'   by_outcome = by_outcome,
+#'   sy_outcome = sy_outcome,
+#'   ny_outcome = 60,
+#'   max_nPC = c(2, 2),
+#'   verbose = FALSE
+#' )
+#' coef(result)
+#' @export
 fmvmr_twosample <- function(G_exposure,
                             fpca_results,
                             by_outcome,
                             sy_outcome,
                             ny_outcome,
-                            max_nPC1 = NA,
-                            max_nPC2 = NA,
+                            max_nPC = NA,
                             true_effects = NULL,
                             verbose = TRUE) {
-  
-  if (!is.list(fpca_results) || length(fpca_results) != 2) {
-    stop("fpca_results must be a list with 2 FPCA objects")
+
+  if (!is.list(fpca_results) || length(fpca_results) < 1) {
+    stop("fpca_results must be a list of m FPCA objects")
   }
-  
+
+  m <- length(fpca_results)
+
   if (length(by_outcome) != ncol(G_exposure)) {
     stop("by_outcome length must equal number of instruments")
   }
-  
+
   if (length(sy_outcome) != length(by_outcome)) {
     stop("sy_outcome must have same length as by_outcome")
   }
-  
-  res1 <- fpca_results[[1]]
-  res2 <- fpca_results[[2]]
-  
-  X1Ymodel <- NA
-  X2Ymodel <- NA
-  if (!is.null(true_effects)) {
-    X1Ymodel <- true_effects$model1
-    X2Ymodel <- true_effects$model2
-  }
-  
+
+  XYmodels <- recycle_arg(true_effects, m, default = NA)
+
   if (verbose) {
     cat("\n=== Two-Sample MV-FMR ===\n")
+    cat("Exposures:", m, "\n")
     cat("Exposure N:", nrow(G_exposure), "\n")
     cat("Outcome N:", ny_outcome, "\n\n")
   }
-  
+
   result <- AUTOMATIC_Multi_FMVMR_twosample_simple(
     Gmatrix = G_exposure,
-    res1 = res1,
-    res2 = res2,
+    res_list = fpca_results,
     by_used = by_outcome,
     sy_used = sy_outcome,
     ny_used = ny_outcome,
-    max_nPC1 = max_nPC1,
-    max_nPC2 = max_nPC2,
-    X1Ymodel = X1Ymodel,
-    X2Ymodel = X2Ymodel,
+    max_nPC = max_nPC,
+    XYmodels = XYmodels,
     basis = "eigenfunction"
   )
-  
+
   out <- structure(
     list(
       coefficients = result$MPCMRest,
       vcov = result$MPCMRvar,
-      effects = list(
-        effect1 = if (!is.null(result$ggdata)) result$ggdata$effect1 else NULL,
-        effect2 = if (!is.null(result$ggdata)) result$ggdata$effect2 else NULL,
-        time_grid = if (!is.null(result$ggdata)) result$ggdata$time else NULL
-      ),
+      effects = lapply(result$ggdata, function(g) g$effect),
+      time_grid = result$ggdata[[1]]$time,
       confidence_intervals = list(
-        effect1_lower = if (!is.null(result$ggdata)) result$ggdata$effect1_low else NULL,
-        effect1_upper = if (!is.null(result$ggdata)) result$ggdata$effect1_up else NULL,
-        effect2_lower = if (!is.null(result$ggdata)) result$ggdata$effect2_low else NULL,
-        effect2_upper = if (!is.null(result$ggdata)) result$ggdata$effect2_up else NULL
+        lower = lapply(result$ggdata, function(g) g$effect_low),
+        upper = lapply(result$ggdata, function(g) g$effect_up)
       ),
-      nPC_used = list(nPC1 = result$nPC1_used, nPC2 = result$nPC2_used),
+      nPC_used = result$nPC_used,
+      offsets = result$offsets,
       Q_stat = result$Q_stat,
       Q_pval = result$Q_pval,
-      performance = if (!is.null(X1Ymodel) && !is.na(X1Ymodel)) {
-        list(
-          MISE1 = result$MISE1,
-          MISE2 = result$MISE2,
-          Coverage1 = result$Coverage_rate1,
-          Coverage2 = result$Coverage_rate2
-        )
+      performance = if (!is.null(result$MISE) && any(!sapply(result$MISE, is.null))) {
+        list(MISE = result$MISE, Coverage = result$Coverage_rate)
       } else NULL,
-      plots = list(p1 = result$p1, p2 = result$p2),
+      plots = list(effects = result$p),
       raw_result = result,
       design = "twosample",
       n_exposure = nrow(G_exposure),
-      n_outcome = ny_outcome
+      n_outcome = ny_outcome,
+      n_exposures = m
     ),
     class = c("fmvmr_twosample", "fmvmr")
   )
-  
+
   if (verbose) cat("=== Complete ===\n\n")
-  
+
   return(out)
 }
 
@@ -446,113 +418,124 @@ fmvmr_twosample <- function(G_exposure,
 #' Two-Sample Separate Univariable Functional MR
 #'
 #' Separate estimation for each exposure using outcome GWAS summary statistics.
-#' For single exposure: set G2 = NULL, by2 = NULL, sy2 = NULL.
 #'
-#' @param G1_exposure Genetic instrument matrix from exposure 1 (N × J1)
-#' @param G2_exposure Genetic instrument matrix from exposure 2 (N × J2) or NULL for single exposure
-#' @param fpca_results List of 2 FPCA objects
-#' @param by_outcome1 SNP-outcome betas for exposure 1 instruments
-#' @param by_outcome2 SNP-outcome betas for exposure 2 instruments or NULL
-#' @param sy_outcome1 Standard errors for exposure 1
-#' @param sy_outcome2 Standard errors for exposure 2 or NULL
+#' @param G_list List of length m of genetic instrument matrices, one per exposure (N x J_k)
+#' @param fpca_results List of length m of FPCA objects, same length as G_list
+#' @param by_outcome_list List of length m of SNP-outcome beta vectors, one per exposure
+#' @param sy_outcome_list List of length m of SNP-outcome standard error vectors, one per exposure
 #' @param ny_outcome Outcome GWAS sample size
-#' @param max_nPC1 Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-#' @param max_nPC2 Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
-#' @param true_effects List containing true effects for exposure 1 and exposure 2 (simulation only)
+#' @param max_nPC Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)
+#' @param true_effects Length-m vector of true effect model codes, one per exposure (simulation only)
 #' @param verbose Print progress messages and diagnostics during computation
-
 #'
 #' @return fmvmr_separate_twosample object
-#' @export 
-fmvmr_separate_twosample <- function(G1_exposure,
-                                     G2_exposure = NULL,
+#' @examples
+#' set.seed(1)
+#' sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+#' outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+#' fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+#'   fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+#'                 list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+#' })
+#' # Simulate outcome GWAS summary statistics for the two-sample design
+#' by_outcome <- sapply(1:8, function(j) {
+#'   coef(lm(outcome_data$Y ~ sim_data$details$G[, j]))[2]
+#' })
+#' sy_outcome <- sapply(1:8, function(j) {
+#'   summary(lm(outcome_data$Y ~ sim_data$details$G[, j]))$coefficients[2, 2]
+#' })
+#' result <- fmvmr_separate_twosample(
+#'   G_list = list(sim_data$details$G, sim_data$details$G),
+#'   fpca_results = fpca_results,
+#'   by_outcome_list = list(by_outcome, by_outcome),
+#'   sy_outcome_list = list(sy_outcome, sy_outcome),
+#'   ny_outcome = 60,
+#'   max_nPC = c(2, 2),
+#'   verbose = FALSE
+#' )
+#' result$exposures[[1]]$coefficients
+#' @export
+fmvmr_separate_twosample <- function(G_list,
                                      fpca_results,
-                                     by_outcome1,
-                                     by_outcome2 = NULL,
-                                     sy_outcome1,
-                                     sy_outcome2 = NULL,
+                                     by_outcome_list,
+                                     sy_outcome_list,
                                      ny_outcome,
-                                     max_nPC1 = NA,
-                                     max_nPC2 = NA,
+                                     max_nPC = NA,
                                      true_effects = NULL,
                                      verbose = TRUE) {
-  
-  if (!is.list(fpca_results) || length(fpca_results) != 2) {
-    stop("fpca_results must be a list with 2 FPCA objects")
+
+  if (!is.list(G_list) || length(G_list) < 1) {
+    stop("G_list must be a list of m genetic instrument matrices")
   }
-  
-  if (length(by_outcome1) != ncol(G1_exposure)) {
-    stop("by_outcome1 length must equal number of instruments in G1")
+
+  m <- length(G_list)
+
+  if (!is.list(fpca_results) || length(fpca_results) != m) {
+    stop("fpca_results must be a list with the same length as G_list (", m, ")")
   }
-  
-  if (length(sy_outcome1) != length(by_outcome1)) {
-    stop("sy_outcome1 must have same length as by_outcome1")
+
+  if (!is.list(by_outcome_list) || length(by_outcome_list) != m) {
+    stop("by_outcome_list must be a list with the same length as G_list (", m, ")")
   }
-  
-  res1 <- fpca_results[[1]]
-  res2 <- fpca_results[[2]]
-  
-  X1Ymodel <- NA
-  X2Ymodel <- NA
-  if (!is.null(true_effects)) {
-    X1Ymodel <- true_effects$model1
-    X2Ymodel <- true_effects$model2
+
+  if (!is.list(sy_outcome_list) || length(sy_outcome_list) != m) {
+    stop("sy_outcome_list must be a list with the same length as G_list (", m, ")")
   }
-  
+
+  if (length(by_outcome_list[[1]]) != ncol(G_list[[1]])) {
+    stop("by_outcome_list[[1]] length must equal number of instruments in G_list[[1]]")
+  }
+
+  if (length(sy_outcome_list[[1]]) != length(by_outcome_list[[1]])) {
+    stop("sy_outcome_list[[1]] must have same length as by_outcome_list[[1]]")
+  }
+
+  XYmodels <- recycle_arg(true_effects, m, default = NA)
+
   if (verbose) {
     cat("\n=== Two-Sample Separate U-FMR ===\n")
-    cat("Exposure N:", nrow(G1_exposure), "\n")
+    cat("Exposures:", m, "\n")
+    cat("Exposure N:", nrow(G_list[[1]]), "\n")
     cat("Outcome N:", ny_outcome, "\n\n")
   }
-  
+
   result <- Separate_Multi_FMVMR_twosample_simple(
-    Gmatrix1 = G1_exposure,
-    Gmatrix2 = G2_exposure,
-    res1 = res1,
-    res2 = res2,
-    by_used1 = by_outcome1,
-    by_used2 = by_outcome2,
-    sy_used1 = sy_outcome1,
-    sy_used2 = sy_outcome2,
+    Gmatrix_list = G_list,
+    res_list = fpca_results,
+    by_used_list = by_outcome_list,
+    sy_used_list = sy_outcome_list,
     ny_used = ny_outcome,
-    max_nPC1 = max_nPC1,
-    max_nPC2 = max_nPC2,
-    X1Ymodel = X1Ymodel,
-    X2Ymodel = X2Ymodel
+    max_nPC = max_nPC,
+    XYmodels = XYmodels,
+    basis = "eigenfunction"
   )
-  
+
+  exposures <- lapply(seq_len(m), function(k) {
+    list(
+      coefficients = result$MPCMRest[[k]],
+      vcov = result$MPCMRvar[[k]],
+      effect = result$ggdata[[k]]$effect,
+      nPC_used = result$nPC_used[[k]],
+      performance = if (!is.null(result$MISE[[k]])) {
+        list(MSE = result$MISE[[k]], Coverage = result$Coverage_rate[[k]])
+      } else NULL
+    )
+  })
+
   out <- structure(
     list(
-      exposure1 = list(
-        coefficients = result$MPCMRest1,
-        vcov = result$MPCMRvar1,
-        effect = if (!is.null(result$ggdata1)) result$ggdata1$effect else NULL,
-        nPC_used = result$nPC_used1,
-        performance = if (!is.null(X1Ymodel) && !is.na(X1Ymodel)) {
-          list(MSE = result$MISE1, Coverage = result$Coverage_rate1)
-        } else NULL
-      ),
-      exposure2 = if (!is.null(G2_exposure)) {
-        list(
-          coefficients = result$MPCMRest2,
-          vcov = result$MPCMRvar2,
-          effect = if (!is.null(result$ggdata2)) result$ggdata2$effect else NULL,
-          nPC_used = result$nPC_used2,
-          performance = if (!is.null(X2Ymodel) && !is.na(X2Ymodel)) {
-            list(MSE = result$MISE2, Coverage = result$Coverage_rate2)
-          } else NULL
-        )
-      } else NULL,
-      plots = list(p1 = result$p1, p2 = result$p2),
+      exposures = exposures,
+      plots = list(effects = result$p),
       raw_result = result,
       design = "twosample",
-      n_exposure = nrow(G1_exposure),
-      n_outcome = ny_outcome
+      n_exposure = nrow(G_list[[1]]),
+      n_outcome = ny_outcome,
+      n_exposures = m
     ),
     class = c("fmvmr_separate_twosample", "fmvmr_separate")
   )
-  
+
   if (verbose) cat("=== Complete ===\n\n")
-  
+
   return(out)
 }

@@ -26,122 +26,124 @@ Fontana, N., Ieva, F., Zuccolo, L., Di Angelantonio, E., & Secchi, P. (2025). Un
 
 The `mvfmr` package implements Multivariable Functional Mendelian Randomization methods to estimate time-varying causal effects of longitudinal exposures on health outcomes. The package supports:
 
-- **Multivariable Functional MR (MV-FMR)**: Joint estimation of multiple time-varying exposures
-- **Univariable Functional MR (U-FMR)**: Estimation of single time-varying exposures
+- **Multivariable Functional MR (MV-FMR)**: Joint estimation of an arbitrary number of correlated time-varying exposures
+- **Univariable Functional MR (U-FMR)**: Separate estimation of each exposure independently (including single-exposure analysis)
 - **Both continuous and binary outcomes**
+- **One-sample and two-sample MR designs** (the latter using outcome GWAS summary statistics)
 - **Automatic component selection** via cross-validation
+- **Mediation pathways** between exposures
 - **Bootstrap inference** for confidence intervals
 - **Instrument strength diagnostics**
 
 ## Installation
 
-Install the package:
+Install the released version from CRAN:
+
+```r
+install.packages("mvfmr")
+```
+
+Or install the development version from GitHub:
 
 ```r
 install.packages("devtools") # Install devtools if not already installed
-devtools::install_github("NicoleFontana/mvfmr") # Install mvfmr from GitHub
-```
-
-Required dependencies:
-```r
-install.packages(c("fdapace", "ggplot2", "glmnet", "pROC", "parallel", "doParallel", "foreach", "progress", "dplyr", "gridExtra"))
+devtools::install_github("NicoleFontana/mvfmr")
 ```
 
 ## Test Scripts and Simulations
 
-The package includes comprehensive test scripts demonstrating different use cases:
+The package ships with test scripts demonstrating different use cases. Once installed, they live inside the package itself, so you can run or open them with `demo()` / `system.file()` — no download needed:
 
-### 1. **Manuscript Simulations** (`tests_manuscript.R`)
-Reproduces main simulation scenarios from the manuscript:
+### 1. **Manuscript Simulations** (`demo/tests_manuscript.R`)
+Reproduces the main simulation scenarios from the manuscript:
 - **Scenario 1-3**: pleiotropy, null effects, mediation
 - **Exposure effects**: linear and quadratic
 - **Performance comparison**: MV-FMR vs U-FMR across scenarios
 - **Evaluation**: MISE, coverage rates
 
 ```r
-# Download and run manuscript simulations
-source("https://raw.githubusercontent.com/NicoleFontana/mvfmr/demo/tests_manuscript.R")
+# Run the manuscript simulations
+demo("tests_manuscript", package = "mvfmr")
 ```
 
-### 2. **Multivariable FMR Tutorial** (`test_MV-FMR.R`)
+### 2. **Multivariable FMR Tutorial** (`inst/examples/test_MV-FMR.R`)
 Complete tutorial for using **joint multivariable** estimation:
 - Data simulation with two exposures
 - FPCA and component selection
-- Joint estimation with `fmvmr()`
+- Joint estimation with `mvfmr()`
 - Instrument diagnostics
 - Performance metrics and visualization
 - Binary outcome analysis
 - Comparison with univariable estimation
 
 ```r
-# Download and explore MV-FMR tutorial
-source("https://raw.githubusercontent.com/NicoleFontana/mvfmr/demo/test_MV-FMR.R")
+# Run the MV-FMR tutorial
+source(system.file("examples", "test_MV-FMR.R", package = "mvfmr"))
+
+# Or just locate it to open/copy/adapt it:
+system.file("examples", "test_MV-FMR.R", package = "mvfmr")
 ```
 
-### 3. **Univariable FMR Tutorial** (`test_U-FMR.R`)
+### 3. **Univariable FMR Tutorial** (`inst/examples/test_U-FMR.R`)
 Complete tutorial for **single exposure** analysis:
 - Single exposure simulation
-- Univariable estimation with `fmvmr_separate()`
+- Univariable estimation with `mvfmr_separate()`
 - Instrument diagnostics
 - Performance metrics and visualization
 - Comparison of different exposure effects
 - Binary outcome analysis
 
 ```r
-# Download and explore U-FMR tutorial
-source("https://raw.githubusercontent.com/NicoleFontana/mvfmr/demo/test_U-FMR.R")
+# Run the U-FMR tutorial
+source(system.file("examples", "test_U-FMR.R", package = "mvfmr"))
 ```
 
-**Note**: These scripts serve as templates for your own analyses. Download them, modify the parameters, and adapt to your specific research questions.
-
+**Note**: These scripts serve as templates for your own analyses. Open them (via `system.file()`), modify the parameters, and adapt to your specific research questions.
 
 ## Quick Start
 
-### Example 1: Multivariable Functional MR (two exposures)
+### Example 1: Joint Multivariable FMR (two exposures)
+
+Exposure-related arguments (`fpca_results`, `max_nPC`, `true_effects`, `X_true`, ...) are lists or vectors of length `m`, one entry per exposure.
 
 ```r
+library(mvfmr)
 library(fdapace)
 
-# Step 1: Simulate exposures data
+# Step 1: Simulate exposure data (m = 2 exposures)
 set.seed(12345)
 sim_data <- getX_multi_exposure(
   N = 1000,           # Sample size
   J = 50,             # Number of genetic instruments
-  nSparse = 10       # Sparse observations per subject
+  nSparse = 10,        # Sparse observations per subject
+  n_exposures = 2      # Number of exposures (m)
 )
 
-# Step 2: Generate outcome 
+# Step 2: Generate outcome
 outcome_data <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",     # Linear effect for exposure 1
-  X2Ymodel = "8",     # Quadratic effect for exposure 2
-  X1_effect = TRUE,
-  X2_effect = TRUE,
+  XYmodels = c("2", "8"),     # Linear effect for exposure 1, quadratic for exposure 2
+  X_effects = c(TRUE, TRUE),
   outcome_type = "continuous"
 )
 
-# Step 3: Functional PCA for both the exposures
-fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
-
-fpca2 <- FPCA(
-  sim_data$X2$Ly_sim, 
-  sim_data$X2$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
+# Step 3: Functional PCA for each exposure
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  FPCA(
+    exp_k$Ly_sim,
+    exp_k$Lt_sim,
+    list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
+  )
+})
 
 # Step 4: Joint estimation with MV-FMR
-result <- fmvmr(
+result <- mvfmr(
   G = sim_data$details$G,
-  fpca_results = list(fpca1, fpca2),
+  fpca_results = fpca_results,
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 10,
-  max_nPC2 = 10,
+  max_nPC = c(10, 10),
   bootstrap = TRUE,
   n_bootstrap = 100
 )
@@ -149,96 +151,137 @@ result <- fmvmr(
 # View results
 print(result)
 summary(result)
-plot(result)  # Visualize time-varying effects
+plot(result)  # Visualize time-varying effects for every exposure
 
 # Extract coefficients and effects
 coef(result)
-result$effects$effect1  # Time-varying effect for exposure 1
-result$effects$effect2  # Time-varying effect for exposure 2
+result$effects[[1]]  # Time-varying effect for exposure 1
+result$effects[[2]]  # Time-varying effect for exposure 2
 ```
 
-### Example 2: Univariable Functional MR (one exposure)
+### Example 2: Separate estimation of multiple exposures
 
-The package can also be used for single exposure analysis (U-FMR):
+Continuing from Example 1: compare joint vs. separate (univariable) estimation
+for the same two exposures. For `mvfmr_separate()`, instruments are passed as
+`G_list`, a list of length `m` (here the same shared instrument matrix is
+reused for both exposures):
 
 ```r
+# Separate estimation (U-FMR for each exposure independently), reusing
+# sim_data / outcome_data / fpca_results simulated in Example 1
+result_separate <- mvfmr_separate(
+  G_list = list(sim_data$details$G, sim_data$details$G),
+  fpca_results = fpca_results,
+  Y = outcome_data$Y
+)
+
+# Compare performance: joint (`result`, from Example 1) vs. separate
+result$performance
+result_separate$exposures[[1]]$performance
+result_separate$exposures[[2]]$performance
+```
+
+### Example 3: Univariable Functional MR (one exposure)
+
+The package can also be used for single exposure analysis (U-FMR), by simulating and passing a single exposure (`n_exposures = 1`, `G_list` of length 1):
+
+```r
+library(mvfmr)
 library(fdapace)
 
-# Step 1: Simulate exposure data
+# Step 1: Simulate a single exposure
 set.seed(12345)
 sim_data <- getX_multi_exposure(
   N = 1000,
   J = 50,
   nSparse = 10,
-  shared_effect = FALSE
+  n_exposures = 1
 )
 
-# Step 2: Generate outcome (only exposure 1 has effect)
+# Step 2: Generate outcome
 outcome_data <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",     # Linear effect for exposure 1
-  X2Ymodel = "0",     # No effect for exposure 2
-  X1_effect = TRUE,
-  X2_effect = FALSE,
+  XYmodels = "2",     # Linear effect
+  X_effects = TRUE,
   outcome_type = "continuous"
 )
 
-# Step 3: FPCA for exposure 1 only
+# Step 3: FPCA for the (only) exposure
 fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
+  sim_data$exposures[[1]]$Ly_sim,
+  sim_data$exposures[[1]]$Lt_sim,
   list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
 )
 
-# Step 4: Univariable estimation for exposure 1 only
-result <- fmvmr_separate(
-  G1 = sim_data$details$G,  # Instruments for exposure 1
-  G2 = NULL,                # No instruments for exposure 2
+# Step 4: Univariable estimation
+result <- mvfmr_separate(
+  G_list = list(sim_data$details$G),  # A list of length 1
   fpca_results = list(fpca1),
   Y = outcome_data$Y,
   outcome_type = "continuous",
   method = "gmm",
-  max_nPC1 = 10,
-  max_nPC2 = 10
+  max_nPC = 10
 )
 
-# View results for exposure 1
+# View results
 print(result)
 coef(result, exposure = 1)
-result$exposure1$effect  # Time-varying effect
+result$exposures[[1]]$effect  # Time-varying effect
 ```
 
-### Example 3: Univariable separate estimation of multiple exposures
+### Example 4: Extending to more than two exposures (m = 3)
 
-Compare joint vs. univariable separate estimation:
+Nothing changes in the API when moving from 2 to `m` exposures: `fpca_results`, `max_nPC`, `true_effects` and `X_true` simply grow to length `m`.
 
 ```r
-# Joint estimation (MV-FMR)
-result_joint <- fmvmr(
-  G = sim_data$details$G,
-  fpca_results = list(fpca1, fpca2),
-  Y = outcome_data$Y
+set.seed(2026)
+sim_data3 <- getX_multi_exposure(N = 1000, J = 50, nSparse = 10, n_exposures = 3)
+
+outcome_data3 <- getY_multi_exposure(
+  sim_data3,
+  XYmodels = c("2", "5", "8"),
+  outcome_type = "continuous"
 )
 
-# Separate estimation (U-FMR for each exposure independently)
-result_separate <- fmvmr_separate(
-  G1 = sim_data$details$G,
-  G2 = sim_data$details$G,
-  fpca_results = list(fpca1, fpca2),
-  Y = outcome_data$Y
+fpca_results3 <- lapply(sim_data3$exposures, function(exp_k) {
+  FPCA(exp_k$Ly_sim, exp_k$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+})
+
+# Joint estimation across all 3 exposures
+result_joint3 <- mvfmr(
+  G = sim_data3$details$G,
+  fpca_results = fpca_results3,
+  Y = outcome_data3$Y,
+  outcome_type = "continuous",
+  method = "gmm",
+  max_nPC = c(10, 10, 10),
+  true_effects = c("2", "5", "8"),
+  X_true = sim_data3$details$X_list
 )
 
-# Compare performance
-result_joint$performance
-result_separate$exposure1$performance
-result_separate$exposure2$performance
+print(result_joint3)
+plot(result_joint3)  # One panel per exposure
+
+# Separate estimation across all 3 exposures
+result_separate3 <- mvfmr_separate(
+  G_list = list(sim_data3$details$G, sim_data3$details$G, sim_data3$details$G),
+  fpca_results = fpca_results3,
+  Y = outcome_data3$Y,
+  max_nPC = c(10, 10, 10),
+  true_effects = c("2", "5", "8")
+)
+
+# Access any exposure by index (1..m)
+result_joint3$effects[[3]]
+coef(result_separate3, exposure = 3)
 ```
 
-### Example 4: Multvariable two-sample Functional MR
+### Example 5: Multivariable two-sample Functional MR
 
-Use outcome GWAS summary statistics instead of individual-level outcome data. 
+Use outcome GWAS summary statistics instead of individual-level outcome data.
 
 ```r
+library(mvfmr)
 library(fdapace)
 
 # Step 1: Simulate exposure data (individual-level)
@@ -246,40 +289,30 @@ set.seed(12345)
 sim_data <- getX_multi_exposure(
   N = 5000,           # Exposure sample size
   J = 30,             # Number of genetic instruments (SNPs)
-  nSparse = 10
+  nSparse = 10,
+  n_exposures = 2
 )
 
 # Perform FPCA on longitudinal exposures
-fpca1 <- FPCA(
-  sim_data$X1$Ly_sim, 
-  sim_data$X1$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  FPCA(exp_k$Ly_sim, exp_k$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+})
 
-fpca2 <- FPCA(
-  sim_data$X2$Ly_sim, 
-  sim_data$X2$Lt_sim,
-  list(dataType = 'Sparse', error = TRUE, verbose = FALSE)
-)
-
-# Step 2: Get outcome GWAS summary statistics (from separate study)
-# Load by_outcome, sy_outcome, ny_outcome from a public GWAS
-
+# Step 2: Get outcome GWAS summary statistics (from a separate study)
 # Simulate obtaining summary statistics from a separate GWAS
-# (This mimics what you'd get from a published GWAS)
+# (this mimics what you'd get from a published GWAS)
 by_outcome <- rnorm(30, mean = 0.02, sd = 0.01)  # SNP-outcome associations
 sy_outcome <- runif(30, 0.005, 0.015)            # Standard errors
 ny_outcome <- 100000                             # GWAS sample size
 
 # Step 3: Two-sample MV-FMR estimation
 result_twosample <- fmvmr_twosample(
-  G_exposure = sim_data$details$G,        # Genotypes from exposure sample
-  fpca_results = list(fpca1, fpca2),      # FPCA from exposures
-  by_outcome = by_outcome,                # GWAS betas (from outcome study)
-  sy_outcome = sy_outcome,                # GWAS standard errors
-  ny_outcome = ny_outcome,                # GWAS sample size
-  max_nPC1 = 3,
-  max_nPC2 = 3,
+  G_exposure = sim_data$details$G,   # Genotypes from the exposure sample
+  fpca_results = fpca_results,       # FPCA from the exposures
+  by_outcome = by_outcome,           # GWAS betas (from the outcome study)
+  sy_outcome = sy_outcome,           # GWAS standard errors
+  ny_outcome = ny_outcome,           # GWAS sample size
+  max_nPC = c(3, 3),
   verbose = TRUE
 )
 
@@ -287,45 +320,48 @@ result_twosample <- fmvmr_twosample(
 print(result_twosample)
 
 # Extract time-varying effects
-result_twosample$effects$effect1 
-result_twosample$effects$effect2  
-
+result_twosample$effects[[1]]
+result_twosample$effects[[2]]
 ```
-
 
 ## Main Functions
 
 ### Data Simulation
 
-**`getX_multi_exposure()`** - Generate genetic instruments and exposure data
+**`getX_multi_exposure()`** - Generate genetic instruments and exposure data for `m` exposures
 ```r
 getX_multi_exposure(
   N = 1000,                  # Sample size
   J = 50,                    # Number of genetic instruments
-  nSparse = 10,              # Observations per subject
-  shared_G_proportion = 0.15 # Proportion of shared instruments (0-1)
+  nSparse = 10,               # Observations per subject
+  n_exposures = 2,            # Number of exposures (m)
+  shared_effect = TRUE,       # Whether all exposures share the same time-varying confounding
+  separate_G = FALSE,         # Whether to use separate instruments per exposure
+  shared_G_proportion = 0.15  # Proportion of shared instruments (0-1, if separate_G = TRUE)
 )
 ```
 
-**`getX_multi_exposure_mediation()`** - Generate data with mediation
+**`getX_multi_exposure_mediation()`** - Generate data with mediation pathways between exposures
 ```r
 getX_multi_exposure_mediation(
   N = 1000,                  # Sample size
   J = 50,                    # Number of genetic instruments
-  nSparse = 10,              # Observations per subject
-  mediation_strength = 0.3,  # Strength of X1 → X2
-  mediation_type = "linear"  # "linear", "nonlinear", "time_varying"
+  nSparse = 10,               # Observations per subject
+  n_exposures = 2,            # Number of exposures (m)
+  mediation_strength = NULL,  # m x m matrix: entry [j, k] (j < k) is the strength
+                              # with which exposure j mediates its effect onto
+                              # exposure k. Default: NULL = no mediation.
+  mediation_type = "linear"   # "linear", "nonlinear", "time_varying" (scalar or
+                              # m x m matrix mirroring mediation_strength)
 )
 ```
 
 **`getY_multi_exposure()`** - Generate outcome with time-varying effects
 ```r
 getY_multi_exposure(
-  RES,                         # Output from getX_multi_exposure()
-  X1Ymodel = "2",              # Effect model for X1 (see below)
-  X2Ymodel = "8",              # Effect model for X2
-  X1_effect = TRUE,            # X1 has an effect on Y
-  X2_effect = TRUE,            # X2 has an effect on Y
+  RES,                         # Output from getX_multi_exposure() or getX_multi_exposure_mediation()
+  XYmodels = NULL,             # Length-m vector of effect models, one per exposure (see below); default '1' for all
+  X_effects = NULL,            # Length-m logical vector: include each exposure's effect?; default TRUE for all
   outcome_type = "continuous"  # "continuous" or "binary"
 )
 ```
@@ -344,79 +380,72 @@ getY_multi_exposure(
 
 ### Estimation Functions
 
-**`fmvmr()`** - Joint multivariable estimation
+**`mvfmr()`** - Joint multivariable estimation
 ```r
-fmvmr(
-  G,                                     # Genetic instrument matrix (N × J)
-  fpca_results,                          # List of 2 FPCA objects
+mvfmr(
+  G,                                     # Genetic instrument matrix (N x J)
+  fpca_results,                          # List of length m of FPCA objects, one per exposure
   Y,                                     # Outcome vector
-  outcome_type = "continuous",           # Type of outcome: "continuous" for numeric outcomes, "binary" for 0/1 outcomes
-  method = "gmm",                        # Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)
-  nPC1_selected = NA,                    # Fixed number of principal components to retain for exposure 1 (NA = select automatically)
-  max_nPC1 = NA,                         # Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-  nPC2_selected = NA,                    # Fixed number of principal components to retain for exposure 2 (NA = select automatically)
-  max_nPC2 = NA,                         # Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
-  improvement_threshold = 0.001,         # Minimum cross-validation improvement required to add an additional principal component
-  bootstrap = FALSE,                     # Whether to compute confidence intervals using bootstrap resampling
-  n_bootstrap = 100,                     # Number of bootstrap replicates (only used if bootstrap = TRUE)
-  n_cores = parallel::detectCores() - 1, # Number of CPU cores to use for parallel computations
-  verbose = TRUE                         # Print progress and diagnostic messages during computation
+  outcome_type = "continuous",           # "continuous" or "binary"
+  method = "gmm",                        # "gmm", "cf" (control function), or "cf-lasso"
+  nPC = NA,                              # Fixed number of components per exposure (length 1 or m; NA = select automatically)
+  max_nPC = NA,                          # Maximum number of components per exposure (length 1 or m)
+  improvement_threshold = 0.001,         # Minimum CV improvement required to add a component
+  bootstrap = FALSE,                     # Whether to compute bootstrap confidence intervals
+  n_bootstrap = 100,                     # Number of bootstrap replicates
+  n_cores = parallel::detectCores() - 1, # Number of CPU cores for parallel computations
+  true_effects = NULL,                   # Length-m vector of true effect model codes (simulation only)
+  X_true = NULL,                         # Length-m list of true X curves (simulation only)
+  verbose = FALSE                        # Print progress and diagnostic messages
 )
 ```
 
-**`fmvmr_separate()`** - Separate univariable estimation
+**`mvfmr_separate()`** - Separate univariable estimation
 ```r
-fmvmr_separate(
-  G1,                    # Genetic instrument matrix for exposure 1
-  G2,                    # Genetic instrument matrix for exposure 2, or NULL if only a single exposure is analyzed
-  fpca_results,          # List of FPCA objects
+mvfmr_separate(
+  G_list,                # List of length m of genetic instrument matrices, one per exposure
+                         # (use a list of length 1 to analyze a single exposure)
+  fpca_results,          # List of length m of FPCA objects, same length as G_list
   Y,                     # Outcome vector
-  outcome_type = "continuous", # Type of outcome: "continuous" for numeric outcomes, "binary" for 0/1 outcomes
-  method = "gmm",        # Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)
-  nPC1_selected = NA,    # Fixed number of principal components to retain for exposure 1 (NA = select automatically)
-  max_nPC1 = NA,         # Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-  nPC2_selected = NA,    # Fixed number of principal components to retain for exposure 2 (NA = select automatically)
-  max_nPC2 = NA,         # Maximum number of principal components to retain for exposure 2 (NA = automatically determined; ignored if G2 is NULL)
-  improvement_threshold = 0.001,         # Minimum cross-validation improvement required to add an additional principal component
-  bootstrap = FALSE,     # Whether to compute confidence intervals using bootstrap resampling
-  n_bootstrap = 100,     # Number of bootstrap replicates (only used if bootstrap = TRUE)
-  n_cores = parallel::detectCores() - 1, # Number of CPU cores to use for parallel computations
-  verbose = TRUE                         # Print progress and diagnostic messages during computation
+  outcome_type = "continuous",
+  method = "gmm",
+  nPC = NA,
+  max_nPC = NA,
+  improvement_threshold = 0.001,
+  bootstrap = FALSE,
+  n_bootstrap = 100,
+  n_cores = parallel::detectCores() - 1,
+  true_effects = NULL,
+  X_true = NULL,
+  verbose = FALSE
 )
-
 ```
 
 **`fmvmr_twosample()`** - Two-sample joint multivariable estimation
 ```r
-rfmvmr_twosample(
-  G_exposure,            # Genetic instrument matrix from the exposure sample (N × J)
-  fpca_results,          # List of 2 FPCA objects corresponding to the two exposures from the exposure data
-  by_outcome,            # Vector of SNP-outcome effect estimates (betas) from the outcome GWAS, length J
+fmvmr_twosample(
+  G_exposure,            # Genetic instrument matrix from the exposure sample (N x J)
+  fpca_results,          # List of length m of FPCA objects
+  by_outcome,            # Vector of SNP-outcome betas from the outcome GWAS, length J
   sy_outcome,            # Vector of standard errors for SNP-outcome effects, length J
   ny_outcome,            # Sample size of the outcome GWAS
-  max_nPC1 = NA,         # Maximum number of principal components to retain for exposure 1 (NA = default)
-  max_nPC2 = NA,         # Maximum number of principal components to retain for exposure 2 (NA = default)
-  true_effects = NULL,   # For simulation studies: list containing true effects for exposure 1 and exposure 2 (e.g., list(model1, model2))
-  verbose = TRUE         # Print progress messages and diagnostics during computation
+  max_nPC = NA,          # Maximum number of components per exposure (length 1 or m)
+  true_effects = NULL,   # Length-m vector of true effect model codes (simulation only)
+  verbose = TRUE
 )
 ```
 
-
-**`fmvmr_separate_twosample()`** - Two-sample separate univariable estimation 
+**`fmvmr_separate_twosample()`** - Two-sample separate univariable estimation
 ```r
-rfmvmr_separate_twosample(
-  G1_exposure,           # Genetic instrument matrix from exposure 1 (N × J1)
-  G2_exposure = NULL,    # Genetic instrument matrix from exposure 2 (N × J2) or NULL for single exposure
-  fpca_results,          # List of 2 FPCA objects
-  by_outcome1,           # SNP-outcome betas for exposure 1 instruments
-  by_outcome2 = NULL,    # SNP-outcome betas for exposure 2 or NULL
-  sy_outcome1,           # Standard errors for exposure 1
-  sy_outcome2 = NULL,    # Standard errors for exposure 2 or NULL
+fmvmr_separate_twosample(
+  G_list,                # List of length m of genetic instrument matrices
+  fpca_results,          # List of length m of FPCA objects
+  by_outcome_list,       # List of length m of SNP-outcome beta vectors
+  sy_outcome_list,       # List of length m of SNP-outcome standard error vectors
   ny_outcome,            # Outcome GWAS sample size
-  max_nPC1 = NA,         # Maximum number of principal components to retain for exposure 1 (NA = automatically determined)
-  max_nPC2 = NA,         # Maximum number of principal components to retain for exposure 2 (NA = automatically determined)
-  true_effects = NULL,   # List containing true effects for exposure 1 and exposure 2 (simulation only)
-  verbose = TRUE         # Print progress messages and diagnostics during computation
+  max_nPC = NA,
+  true_effects = NULL,
+  verbose = TRUE
 )
 ```
 
@@ -426,7 +455,7 @@ rfmvmr_separate_twosample(
 ```r
 IS(
   J,                     # Number of genetic instruments
-  K,                     # Number of exposures
+  K,                     # Number of exposures/components
   PC,                    # Vector of indices indicating which columns in datafull correspond to the principal components
   datafull,              # Data frame containing instruments (first J columns) and principal components (subsequent columns) [G, X]
   Y                      # Optional outcome vector; if provided, Q-statistic for overidentification is calculated
@@ -450,45 +479,42 @@ The package supports three estimation methods:
 
 ## Output Objects
 
-### `fmvmr` object (from `fmvmr()`)
+### `mvfmr` object (from `mvfmr()`)
 
 ```r
-result <- fmvmr(...)
+result <- mvfmr(...)
 names(result)
 ```
 
 Components:
-- `coefficients` - Estimated β coefficients for basis functions
+- `coefficients` - Estimated β coefficients for basis functions (stacked across all exposures)
 - `vcov` - Variance-covariance matrix
-- `effects` - List with `effect1`, `effect2`, `time_grid`
-- `confidence_intervals` - Upper and lower bounds
-- `nPC_used` - Selected components (nPC1, nPC2)
-- `performance` - MISE and coverage (only for simulations)
-- `plots` - ggplot2 objects for visualization
+- `effects` - List of length m, one time-varying effect curve per exposure
+- `confidence_intervals` - `lower`/`upper`, each a list of length m
+- `nPC_used` - Vector of length m: components selected per exposure
+- `performance` - `MISE` and `Coverage` (lists of length m), only for simulations
+- `plots` - `effects` (list of m ggplot2 objects) and `plot_beta` (combined coefficient plot)
 
 Methods:
 - `print()`, `summary()` - Display results
-- `plot()` - Visualize time-varying effects
+- `plot()` - Visualize time-varying effects for every exposure
 - `coef()` - Extract coefficients
 - `vcov()` - Extract variance-covariance matrix
 
-### `fmvmr_separate` object (from `fmvmr_separate()`)
+### `mvfmr_separate` object (from `mvfmr_separate()`)
 
 ```r
-result <- fmvmr_separate(...)
+result <- mvfmr_separate(...)
 names(result)
 ```
 
 Components:
-- `exposure1` - Results for exposure 1
-  - `coefficients`, `vcov`, `effect`, `nPC_used`, `performance`
-- `exposure2` - Results for exposure 2 (if provided)
-  - `coefficients`, `vcov`, `effect`, `nPC_used`, `performance`
-- `plots` - Visualization objects
+- `exposures` - List of length m; each entry has `coefficients`, `vcov`, `effect`, `nPC_used`, `performance`
+- `plots` - `effects`, a list of m ggplot2 objects
 
 Methods:
-- `coef(result, exposure = 1)` - Extract coefficients for specific exposure
-- `vcov(result, exposure = 1)` - Extract variance-covariance matrix
+- `coef(result, exposure = k)` - Extract coefficients for exposure `k` (1..m)
+- `vcov(result, exposure = k)` - Extract variance-covariance matrix for exposure `k`
 
 ## Binary Outcomes
 
@@ -498,13 +524,12 @@ For binary outcomes, use `method = "cf"` or `method = "cf-lasso"`:
 # Generate binary outcome
 outcome_binary <- getY_multi_exposure(
   sim_data,
-  X1Ymodel = "2",
-  X2Ymodel = "8",
+  XYmodels = c("2", "8"),
   outcome_type = "binary"
 )
 
 # Estimate with control function
-result <- fmvmr(
+result <- mvfmr(
   G = sim_data$details$G,
   fpca_results = list(fpca1, fpca2),
   Y = outcome_binary$Y,
@@ -519,13 +544,12 @@ result <- fmvmr(
 
 Automatic selection via cross-validation:
 ```r
-result <- fmvmr(
+result <- mvfmr(
   G = G,
   fpca_results = list(fpca1, fpca2),
   Y = Y,
-  max_nPC1 = 10,              # Search up to 10 components
-  max_nPC2 = 10,
-  improvement_threshold = 0.01 # Stop if improvement < 1%
+  max_nPC = c(10, 10),          # Search up to 10 components per exposure
+  improvement_threshold = 0.01  # Stop if improvement < 1%
 )
 
 # View selected components
@@ -535,7 +559,7 @@ result$nPC_used
 ### Bootstrap Inference
 
 ```r
-result <- fmvmr(
+result <- mvfmr(
   G = G,
   fpca_results = list(fpca1, fpca2),
   Y = Y,
@@ -550,7 +574,7 @@ result$confidence_intervals
 ### Parallel Processing
 
 ```r
-result <- fmvmr(
+result <- mvfmr(
   G = G,
   fpca_results = list(fpca1, fpca2),
   Y = Y,
@@ -560,47 +584,58 @@ result <- fmvmr(
 
 ### Mediation Analysis
 
+`mediation_strength` is an m x m matrix: entry `[j, k]` (with `j < k`) is the
+strength with which exposure `j` mediates its effect onto exposure `k`. Any
+exposure can mediate onto any later one, each with its own strength, so
+mediation chains with more than two exposures (e.g. X1 -> X2, X1 -> X3, X2 -> X3)
+are supported directly.
+
 ```r
-# Generate data with X1 → X2 mediation
+# Generate data where exposure 1 mediates onto exposure 2
+mediation_strength <- matrix(0, 2, 2)
+mediation_strength[1, 2] <- 0.5
+
 sim_mediation <- getX_multi_exposure_mediation(
   N = 1000,
   J = 50,
-  mediation_strength = 0.5,
+  n_exposures = 2,
+  mediation_strength = mediation_strength,
   mediation_type = "linear"
 )
 
 outcome <- getY_multi_exposure(
   sim_mediation,
-  X1Ymodel = "2",  # Direct effect of X1
-  X2Ymodel = "1",  # Effect of X2 (mediator)
+  XYmodels = c("2", "1"),  # Direct effect of exposure 1; effect of exposure 2 (mediator)
   outcome_type = "continuous"
 )
 
+fpca_results <- lapply(sim_mediation$exposures, function(exp_k) {
+  FPCA(exp_k$Ly_sim, exp_k$Lt_sim, list(dataType = 'Sparse', error = TRUE, verbose = FALSE))
+})
+
 # Estimate with MV-FMR to capture mediation
-result <- fmvmr(
+result <- mvfmr(
   G = sim_mediation$details$G,
-  fpca_results = list(fpca1, fpca2),
+  fpca_results = fpca_results,
   Y = outcome$Y
 )
 ```
 
 ## Instrument Strength Diagnostics
 
-Check instrument strength with F-statistics:
+Check instrument strength with F-statistics (`IS()` is generic in the number of exposures/components `K`):
 
 ```r
 # After FPCA
-K_total <- fpca1$selectK + fpca2$selectK
+K_total <- sum(sapply(fpca_results, function(f) f$selectK))
+
+PC_stacked <- do.call(cbind, lapply(fpca_results, function(f) f$xiEst[, 1:f$selectK]))
 
 fstats <- IS(
   J = ncol(G),
   K = K_total,
   PC = 1:K_total,
-  datafull = cbind(
-    G,
-    cbind(fpca1$xiEst[, 1:fpca1$selectK], 
-          fpca2$xiEst[, 1:fpca2$selectK])
-  )
+  datafull = cbind(G, PC_stacked)
 )
 
 # View conditional F-statistics (cFF)
@@ -632,7 +667,7 @@ Nicole Fontana
 
 ## License
 
-[License information]
+MIT — see the [LICENSE](LICENSE) file for details.
 
 ## Getting Help
 

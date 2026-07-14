@@ -5,48 +5,38 @@
 \title{Separate univariable functional MR estimation (internal)}
 \usage{
 Separate_Multi_MVFMR(
-  Gmatrix1,
-  Gmatrix2 = NULL,
-  res1 = NA,
-  res2 = NA,
+  Gmatrix_list,
+  res_list,
   Yvector,
   IDmatch = NA,
-  nPC1_selected = NA,
-  max_nPC1 = NA,
-  nPC2_selected = NA,
-  max_nPC2 = NA,
+  nPC_selected = NA,
+  max_nPC = NA,
+  X_true = NULL,
   method = "gmm",
   basis = "eigenfunction",
   outcome = "continuous",
   bootstrap = FALSE,
   n_B = 10,
   improvement_threshold = 0.01,
-  X1Ymodel = NA,
-  X2Ymodel = NA,
+  XYmodels = NA,
   num_cores_set = NA,
   verbose = FALSE
 )
 }
 \arguments{
-\item{Gmatrix1}{Genetic instrument matrix for exposure 1 (N × J1)}
+\item{Gmatrix_list}{List of length m of genetic instrument matrices, one per exposure (N x J_k)}
 
-\item{Gmatrix2}{Genetic instrument matrix for exposure 2 (required if separate_G = TRUE)}
-
-\item{res1}{FPCA result for exposure 1 (from fdapace)}
-
-\item{res2}{FPCA result for exposure 2 (from fdapace)}
+\item{res_list}{List of length m of FPCA results (from fdapace), one per exposure}
 
 \item{Yvector}{Outcome vector (length N)}
 
-\item{IDmatch}{Optional index vector to match rows of Gmatrix, Gmatrix2 (if used), and Yvector (default: 1:N)}
+\item{IDmatch}{Optional index vector to match rows of the Gmatrix_list entries and Yvector (default: 1:N)}
 
-\item{nPC1_selected}{Fixed number of principal components to retain for exposure 1 (NA = select automatically)}
+\item{nPC_selected}{Length-m vector: fixed number of principal components to retain per exposure (NA = select automatically)}
 
-\item{max_nPC1}{Maximum number of principal components to consider for exposure 1 during selection}
+\item{max_nPC}{Length-m vector: maximum number of principal components to consider per exposure during selection}
 
-\item{nPC2_selected}{Fixed number of principal components to retain for exposure 2 (NA = select automatically)}
-
-\item{max_nPC2}{Maximum number of principal components to consider for exposure 2 during selection}
+\item{X_true}{Length-m list: optional true X curves per exposure (simulation only), NULL entries allowed}
 
 \item{method}{Estimation method: "gmm" (Generalized Method of Moments), "cf" (control function), or "cf-lasso" (control function with Lasso)}
 
@@ -60,19 +50,17 @@ Separate_Multi_MVFMR(
 
 \item{improvement_threshold}{Minimum cross-validation improvement required to add an additional principal component}
 
-\item{X1Ymodel}{Optional: true effect model for X1 on Y (simulation only)}
-
-\item{X2Ymodel}{Optional: true effect model for X2 on Y (simulation only)}
+\item{XYmodels}{Length-m vector: optional true effect model for each exposure on Y (simulation only)}
 
 \item{num_cores_set}{Number of CPU cores to use for parallel processing}
 
 \item{verbose}{Print progress messages and diagnostics during computation}
 }
 \value{
-List with separate estimation results for both exposures
+List with separate estimation results for each of the m exposures
 }
 \description{
 Performs separate estimation of time-varying causal effects for each
-exposure independently with automatic component selection.
+of m exposures independently with automatic component selection.
 }
 \keyword{internal}

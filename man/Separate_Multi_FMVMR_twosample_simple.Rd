@@ -5,53 +5,35 @@
 \title{Separate univariable two-sample FMR (internal)}
 \usage{
 Separate_Multi_FMVMR_twosample_simple(
-  Gmatrix1,
-  Gmatrix2 = NULL,
-  res1,
-  res2,
-  by_used1,
-  by_used2 = NULL,
-  sy_used1,
-  sy_used2 = NULL,
+  Gmatrix_list,
+  res_list,
+  by_used_list,
+  sy_used_list,
   ny_used,
-  max_nPC1 = NA,
-  max_nPC2 = NA,
-  X1Ymodel = NA,
-  X2Ymodel = NA,
+  max_nPC = NA,
+  XYmodels = NA,
   basis = "eigenfunction"
 )
 }
 \arguments{
-\item{Gmatrix1}{Genetic instrument matrix from exposure 1 (N × J1)}
+\item{Gmatrix_list}{List of length m of genetic instrument matrices, one per exposure (N x J_k)}
 
-\item{Gmatrix2}{Genetic instrument matrix from exposure 2 (N × J2) or NULL}
+\item{res_list}{List of length m of FPCA results, one per exposure}
 
-\item{res1}{FPCA result for exposure 1}
+\item{by_used_list}{List of length m of SNP-outcome effect estimate vectors, one per exposure}
 
-\item{res2}{FPCA result for exposure 2}
-
-\item{by_used1}{Vector of SNP-outcome effect estimates (betas for X1) from the outcome GWAS, length J}
-
-\item{by_used2}{Vector of SNP-outcome effect estimates (betas for X2) from the outcome GWAS, length J or NULL}
-
-\item{sy_used1}{Vector of standard errors for SNP-outcome effects for X1, length J}
-
-\item{sy_used2}{Vector of standard errors for SNP-outcome effects for X2, length J or NULL}
+\item{sy_used_list}{List of length m of SNP-outcome standard error vectors, one per exposure}
 
 \item{ny_used}{Sample size of the outcome GWAS}
 
-\item{max_nPC1}{Maximum number of principal components to retain for exposure 1 (NA = select automatically)}
+\item{max_nPC}{Length-m vector: maximum number of principal components to retain per exposure (NA = select automatically)}
 
-\item{max_nPC2}{Maximum number of principal components to retain for exposure 2 (NA = select automatically)}
-
-\item{X1Ymodel}{True effect model for X1 on Y (for simulation only)}
-
-\item{X2Ymodel}{True effect model for X2 on Y (for simulation only)}
+\item{XYmodels}{Length-m vector: true effect model for each exposure on Y (for simulation only)}
 
 \item{basis}{Basis type for functional representation: "eigenfunction" or "polynomial"}
 }
 \value{
-List with separate estimation results for both exposures
+List with separate estimation results for each of the m exposures
 }
 \description{
 Separate univariable two-sample FMR (internal)

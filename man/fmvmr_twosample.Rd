@@ -10,8 +10,7 @@ fmvmr_twosample(
   by_outcome,
   sy_outcome,
   ny_outcome,
-  max_nPC1 = NA,
-  max_nPC2 = NA,
+  max_nPC = NA,
   true_effects = NULL,
   verbose = TRUE
 )
@@ -19,7 +18,7 @@ fmvmr_twosample(
 \arguments{
 \item{G_exposure}{Genetic instrument matrix from the exposure sample (N × J)}
 
-\item{fpca_results}{List of 2 FPCA objects}
+\item{fpca_results}{List of length m of FPCA objects, one per exposure}
 
 \item{by_outcome}{Vector of SNP-outcome effect estimates (betas) from the outcome GWAS, length J}
 
@@ -27,11 +26,9 @@ fmvmr_twosample(
 
 \item{ny_outcome}{Sample size of the outcome GWAS}
 
-\item{max_nPC1}{Maximum number of principal components to retain for exposure 1 (NA = automatically determined)}
+\item{max_nPC}{Maximum number of principal components to retain per exposure (length 1 or m; NA = automatically determined)}
 
-\item{max_nPC2}{Maximum number of principal components to retain for exposure 2 (NA = automatically determined)}
-
-\item{true_effects}{List containing true effects for exposure 1 and exposure 2 (simulation only)}
+\item{true_effects}{Length-m vector of true effect model codes, one per exposure (simulation only)}
 
 \item{verbose}{Print progress messages and diagnostics during computation}
 }
@@ -41,4 +38,30 @@ fmvmr_twosample object
 \description{
 Joint estimation using outcome GWAS summary statistics.
 Simplified approach: only needs by, sy, ny (not individual outcome data).
+}
+\examples{
+set.seed(1)
+sim_data <- getX_multi_exposure(N = 60, J = 8, nSparse = 5, n_exposures = 2)
+outcome_data <- getY_multi_exposure(sim_data, XYmodels = c("2", "8"))
+fpca_results <- lapply(sim_data$exposures, function(exp_k) {
+  fdapace::FPCA(exp_k$Ly_sim, exp_k$Lt_sim,
+                list(dataType = "Sparse", error = TRUE, verbose = FALSE))
+})
+# Simulate outcome GWAS summary statistics for the two-sample design
+by_outcome <- sapply(1:8, function(j) {
+  coef(lm(outcome_data$Y ~ sim_data$details$G[, j]))[2]
+})
+sy_outcome <- sapply(1:8, function(j) {
+  summary(lm(outcome_data$Y ~ sim_data$details$G[, j]))$coefficients[2, 2]
+})
+result <- fmvmr_twosample(
+  G_exposure = sim_data$details$G,
+  fpca_results = fpca_results,
+  by_outcome = by_outcome,
+  sy_outcome = sy_outcome,
+  ny_outcome = 60,
+  max_nPC = c(2, 2),
+  verbose = FALSE
+)
+coef(result)
 }
